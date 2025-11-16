@@ -5,7 +5,7 @@
 #include "Core/Game/SFW_GameState.h"
 #include "Core/Rooms/RoomVolume.h"
 #include "EngineUtils.h"
-#include "Core/AnomalySystems/SFW_SigilSystem.h" 
+#include "Core/AnomalySystems/SFW_SigilSystem.h"
 
 DEFINE_LOG_CATEGORY(LogAnomalyController);
 
@@ -29,37 +29,29 @@ bool ASFW_AnomalyController::IsForbiddenRoom(ARoomVolume* R) const
 {
 	if (!R) return true;
 
-	// Safe rooms and hallways should never be Base/Rift
-	if (R->bIsSafeRoom)
+	switch (R->RoomType)
 	{
+	case ERoomType::Safe:
+	case ERoomType::Hallway:
 		return true;
+	default:
+		break; // Base or RiftCandidate are allowed in the pool
 	}
-
-	static const FName HallName(TEXT("Hallway"));
-	if (R->RoomId == HallName)
-	{
-		return true;
-	}
-
 	return false;
 }
 
 void ASFW_AnomalyController::PickAnomalyType()
 {
-	// Simple example: random between Binder and Splitter.
-	// You can replace this with weighted logic or external config.
+	// Example: random between Binder and Splitter.
 	const int32 Roll = FMath::RandRange(0, 1);
 	ActiveAnomalyType = (Roll == 0)
 		? ESFWAnomalyType::Binder
 		: ESFWAnomalyType::Splitter;
 
-	UE_LOG(
-		LogAnomalyController,
-		Log,
-		TEXT("PickAnomalyType: %d"),
-		static_cast<int32>(ActiveAnomalyType)
-	);
+	UE_LOG(LogAnomalyController, Log, TEXT("PickAnomalyType: %d"), static_cast<int32>(ActiveAnomalyType));
 }
+
+
 
 void ASFW_AnomalyController::PickRooms()
 {
@@ -69,64 +61,41 @@ void ASFW_AnomalyController::PickRooms()
 	UWorld* W = GetWorld();
 	if (!W) return;
 
-	// Collect candidate rooms: not safe, not hallway
-	TArray<ARoomVolume*> Candidates;
+	// Pool = all rooms that are NOT Safe and NOT Hallway
+	TArray<ARoomVolume*> Pool;
 	for (TActorIterator<ARoomVolume> It(W); It; ++It)
 	{
 		ARoomVolume* R = *It;
-		if (!R) continue;
-
-		if (IsForbiddenRoom(R))
+		if (R && !IsForbiddenRoom(R))
 		{
-			continue;
+			Pool.Add(R);
 		}
-
-		Candidates.Add(R);
 	}
 
-	if (Candidates.Num() == 0)
+	if (Pool.Num() < 2)
 	{
-		UE_LOG(
-			LogAnomalyController,
-			Warning,
-			TEXT("PickRooms: No valid room candidates (non-safe, non-hallway).")
-		);
+		UE_LOG(LogAnomalyController, Warning,
+			TEXT("PickRooms: Need at least 2 candidates (non-safe, non-hallway). Found=%d"), Pool.Num());
 		return;
 	}
 
-	// Pick Base randomly
-	const int32 BaseIdx = FMath::RandRange(0, Candidates.Num() - 1);
-	BaseRoom = Candidates[BaseIdx];
+	// Pick Base from the pool
+	const int32 BaseIdx = FMath::RandRange(0, Pool.Num() - 1);
+	BaseRoom = Pool[BaseIdx];
 
-	if (Candidates.Num() < 2)
-	{
-		// Only one candidate; cannot pick a distinct Rift
-		RiftRoom = nullptr;
-		UE_LOG(
-			LogAnomalyController,
-			Warning,
-			TEXT("PickRooms: Only one valid room candidate. Base=%s Rift=NULL"),
-			*GetNameSafe(BaseRoom)
-		);
-		return;
-	}
+	// Rift = any other from the pool
+	TArray<ARoomVolume*> RiftPool = Pool;
+	RiftPool.RemoveAt(BaseIdx);
 
-	// Pick Rift randomly, distinct from Base
-	int32 RiftIdx = FMath::RandRange(0, Candidates.Num() - 2);
-	if (RiftIdx >= BaseIdx)
-	{
-		RiftIdx++; // skip over BaseIdx
-	}
-	RiftRoom = Candidates[RiftIdx];
+	const int32 RiftIdx = FMath::RandRange(0, RiftPool.Num() - 1);
+	RiftRoom = RiftPool[RiftIdx];
 
-	UE_LOG(
-		LogAnomalyController,
-		Log,
+	UE_LOG(LogAnomalyController, Log,
 		TEXT("PickRooms: Base=%s Rift=%s"),
 		*GetNameSafe(BaseRoom),
-		*GetNameSafe(RiftRoom)
-	);
+		*GetNameSafe(RiftRoom));
 }
+
 
 void ASFW_AnomalyController::StartRound()
 {
@@ -135,7 +104,7 @@ void ASFW_AnomalyController::StartRound()
 	// 1) Decide which anomaly archetype this round uses
 	PickAnomalyType();
 
-	// 2) Pick rooms
+	// 2) Pick rooms according to RoomType rules
 	PickRooms();
 
 	// 3) Mark round state on GameState
@@ -148,51 +117,37 @@ void ASFW_AnomalyController::StartRound()
 		G->RoundSeed = FMath::Rand();
 		G->BaseRoom = BaseRoom;
 		G->RiftRoom = RiftRoom;
-
-		// G->ActiveAnomalyType = ActiveAnomalyType; // if you add this later
+		// If added later: G->ActiveAnomalyType = ActiveAnomalyType;
 	}
 
-	// 4) Initialize sigil layout for the rift room (for now: always, if RiftRoom exists)
+	// 4) Initialize sigil layout for the rift room (Binder uses this; harmless no-op otherwise)
 	if (RiftRoom)
 	{
-		UWorld* W = GetWorld();
-		if (W)
+		if (UWorld* W = GetWorld())
 		{
 			ASFW_SigilSystem* SigilSystem = nullptr;
-
 			for (TActorIterator<ASFW_SigilSystem> It(W); It; ++It)
 			{
 				SigilSystem = *It;
-				break; // use first one found
+				break; // first one found
 			}
 
 			if (SigilSystem)
 			{
 				SigilSystem->InitializeLayoutForRoom(RiftRoom->RoomId);
-
-				UE_LOG(
-					LogAnomalyController,
-					Log,
+				UE_LOG(LogAnomalyController, Log,
 					TEXT("StartRound: Initialized sigil layout for RiftRoom=%s"),
-					*GetNameSafe(RiftRoom)
-				);
+					*GetNameSafe(RiftRoom));
 			}
 			else
 			{
-				UE_LOG(
-					LogAnomalyController,
-					Warning,
-					TEXT("StartRound: No ASFW_SigilSystem found in world; sigil puzzle disabled.")
-				);
+				UE_LOG(LogAnomalyController, Warning,
+					TEXT("StartRound: No ASFW_SigilSystem found in world; sigil puzzle disabled."));
 			}
 		}
 	}
 
-	UE_LOG(
-		LogAnomalyController,
-		Warning,
+	UE_LOG(LogAnomalyController, Warning,
 		TEXT("StartRound: AnomalyController Spawned. Type=%d"),
-		static_cast<int32>(ActiveAnomalyType)
-	);
+		static_cast<int32>(ActiveAnomalyType));
 }
-

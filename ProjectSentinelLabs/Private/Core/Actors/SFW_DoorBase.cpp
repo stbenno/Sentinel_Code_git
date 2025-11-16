@@ -4,6 +4,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/BoxComponent.h"             // + add
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "EngineUtils.h"
@@ -24,13 +25,25 @@ ASFW_DoorBase::ASFW_DoorBase()
 	Door->SetupAttachment(Frame);
 	Door->SetMobility(EComponentMobility::Movable);
 
-	// Keep on the frame so it stays put while the leaf swings
+	// Proximity (for scare logic)
 	ProximityTrigger = CreateDefaultSubobject<USphereComponent>(TEXT("ProximityTrigger"));
 	ProximityTrigger->SetupAttachment(Frame);
 	ProximityTrigger->InitSphereRadius(90.f);
 	ProximityTrigger->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	ProximityTrigger->SetCollisionResponseToAllChannels(ECR_Ignore);
 	ProximityTrigger->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	ProximityTrigger->SetCanEverAffectNavigation(false);
+
+	// NEW: Dedicated interaction hit box (line-trace friendly, static size per door)
+	InteractionBox = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionBox"));
+	InteractionBox->SetupAttachment(Door);                     // swings with the door
+	InteractionBox->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	InteractionBox->SetCollisionObjectType(ECC_WorldDynamic);
+	InteractionBox->SetCollisionResponseToAllChannels(ECR_Ignore);
+	InteractionBox->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+	InteractionBox->SetCollisionResponseToChannel(ECC_Camera, ECR_Block);
+	InteractionBox->bHiddenInGame = true;
+	InteractionBox->SetCanEverAffectNavigation(false);
 
 	ScareFXAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("ScareFXAnchor"));
 	ScareFXAnchor->SetupAttachment(Frame);
@@ -39,6 +52,9 @@ ASFW_DoorBase::ASFW_DoorBase()
 void ASFW_DoorBase::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+
+	
+
 	const float Yaw = (InitialState == EDoorState::Open) ? OpenYaw : ClosedYaw;
 	SnapTo(Yaw);
 	State = InitialState;
@@ -162,12 +178,8 @@ void ASFW_DoorBase::FinishMotion()
 
 void ASFW_DoorBase::OpenDoor()
 {
-	UE_LOG(LogTemp, Warning,
-		TEXT("[Door] %s OpenDoor State=%d Locked=%d Role=%d"),
-		*GetName(),
-		(int32)State,
-		IsLocked() ? 1 : 0,
-		(int32)GetLocalRole());
+	UE_LOG(LogTemp, Warning, TEXT("[Door] %s OpenDoor State=%d Locked=%d Role=%d"),
+		*GetName(), (int32)State, IsLocked() ? 1 : 0, (int32)GetLocalRole());
 
 	if (IsLocked()) return;
 	if (State == EDoorState::Open || State == EDoorState::Opening) return;
@@ -179,12 +191,8 @@ void ASFW_DoorBase::OpenDoor()
 
 void ASFW_DoorBase::CloseDoor()
 {
-	UE_LOG(LogTemp, Warning,
-		TEXT("[Door] %s CloseDoor State=%d Locked=%d Role=%d"),
-		*GetName(),
-		(int32)State,
-		IsLocked() ? 1 : 0,
-		(int32)GetLocalRole());
+	UE_LOG(LogTemp, Warning, TEXT("[Door] %s CloseDoor State=%d Locked=%d Role=%d"),
+		*GetName(), (int32)State, IsLocked() ? 1 : 0, (int32)GetLocalRole());
 
 	if (State == EDoorState::Closed || State == EDoorState::Closing) return;
 	if (!HasAuthority()) return;
@@ -192,7 +200,6 @@ void ASFW_DoorBase::CloseDoor()
 	State = EDoorState::Closing;
 	ApplyState();
 }
-
 
 void ASFW_DoorBase::LockDoor(float Duration)
 {
@@ -209,9 +216,56 @@ void ASFW_DoorBase::Unlock()
 	LockEndTime = 0.f;
 }
 
+// === Player interaction support ===
+void ASFW_DoorBase::Interact_Implementation(AController* /*Controller*/)
+{
+	if (!HasAuthority())
+	{
+		Server_PlayerToggle(nullptr);
+		return;
+	}
+
+	if (!CanPlayerToggle())
+		return;
+
+	if (State == EDoorState::Open || State == EDoorState::Opening) CloseDoor();
+	else                                                           OpenDoor();
+
+	if (UWorld* W = GetWorld())
+	{
+		NextPlayerToggleTime = W->GetTimeSeconds() + PlayerToggleCooldown;
+	}
+}
+
+void ASFW_DoorBase::Server_PlayerToggle_Implementation(AController* /*Controller*/)
+{
+	if (!CanPlayerToggle())
+		return;
+
+	if (State == EDoorState::Open || State == EDoorState::Opening) CloseDoor();
+	else                                                           OpenDoor();
+
+	if (UWorld* W = GetWorld())
+	{
+		NextPlayerToggleTime = W->GetTimeSeconds() + PlayerToggleCooldown;
+	}
+}
+
+bool ASFW_DoorBase::CanPlayerToggle() const
+{
+	const UWorld* W = GetWorld();
+	const double Now = W ? W->GetTimeSeconds() : 0.0;
+
+	if (IsLocked()) return false;
+	if (State == EDoorState::Opening || State == EDoorState::Closing) return false;
+	if (Now < NextPlayerToggleTime) return false;
+
+	return true;
+}
+
 // --- Scare logic ---
-void ASFW_DoorBase::OnProximityBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
-	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+void ASFW_DoorBase::OnProximityBegin(UPrimitiveComponent* /*OverlappedComp*/, AActor* OtherActor,
+	UPrimitiveComponent* /*OtherComp*/, int32 /*OtherBodyIndex*/, bool /*bFromSweep*/, const FHitResult& /*SweepResult*/)
 {
 	if (!HasAuthority()) return;
 	if (APawn* Pawn = Cast<APawn>(OtherActor))
@@ -246,8 +300,6 @@ void ASFW_DoorBase::StartSlamSequence(APawn* /*Pawn*/)
 {
 	const FTransform Where = ComputeScareFXTransform();
 	Multicast_PlaySlamFX(Where);
-
-	// time the actual door slam to match the animation beat
 	GetWorldTimerManager().SetTimer(Timer_SlamImpact, this, &ASFW_DoorBase::OnSlamImpact, SlamImpactDelay, false);
 }
 
@@ -265,15 +317,9 @@ void ASFW_DoorBase::OnSlamImpact()
 
 FTransform ASFW_DoorBase::ComputeScareFXTransform() const
 {
-	// Base space = anchor if present, otherwise actor
 	const FTransform Base = ScareFXAnchor ? ScareFXAnchor->GetComponentTransform() : GetActorTransform();
-
-	// Location: local offset in anchor space
 	const FVector WorldLoc = Base.TransformPosition(ScareFXLocationOffset);
-
-	// Rotation: apply local offset on top of base rotation
-	const FQuat WorldRot = Base.GetRotation() * ScareFXRotationOffset.Quaternion();
-
+	const FQuat   WorldRot = Base.GetRotation() * ScareFXRotationOffset.Quaternion();
 	return FTransform(WorldRot, WorldLoc, FVector(1.f));
 }
 
@@ -286,7 +332,7 @@ void ASFW_DoorBase::Multicast_PlaySlamFX_Implementation(const FTransform& Where)
 
 	if (FX)
 	{
-		FX->Lifetime = ScareFXLifetime; // Blueprint subclass anim can auto-play
+		FX->Lifetime = ScareFXLifetime;
 		FX->FinishSpawning(Where);
 
 		if (bAttachFXToAnchor && ScareFXAnchor)
@@ -306,12 +352,8 @@ void ASFW_DoorBase::Multicast_PlaySlamSFX_Implementation(const FVector& Loc)
 
 void ASFW_DoorBase::HandleDecision_Implementation(const FSFWDecisionPayload& P)
 {
-	UE_LOG(LogTemp, Warning,
-		TEXT("[Door] %s HandleDecision Type=%d PayRoom=%s DoorRoom=%s"),
-		*GetName(),
-		(int32)P.Type,
-		*P.RoomId.ToString(),
-		*RoomID.ToString());
+	UE_LOG(LogTemp, Warning, TEXT("[Door] %s HandleDecision Type=%d PayRoom=%s DoorRoom=%s"),
+		*GetName(), (int32)P.Type, *P.RoomId.ToString(), *RoomID.ToString());
 
 	if (!HasAuthority() || P.RoomId != RoomID) return;
 
@@ -323,14 +365,3 @@ void ASFW_DoorBase::HandleDecision_Implementation(const FSFWDecisionPayload& P)
 	default: break;
 	}
 }
-
-/*void ASFW_DoorBase::Server_Debug_ForceScare_Implementation(APawn* InstigatorPawn)
-{
-	TryDoorScare(InstigatorPawn, true);
-}
-*/
-
-
-
-
-

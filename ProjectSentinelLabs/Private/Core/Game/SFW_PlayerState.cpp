@@ -1,6 +1,5 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "Core/Game/SFW_PlayerState.h"
 #include "Net/UnrealNetwork.h"
 #include "PlayerCharacter/Data/SFW_AgentCatalog.h"
@@ -22,6 +21,10 @@ void ASFW_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
 	DOREPLIFETIME(ASFW_PlayerState, AgentCatalog);
 	DOREPLIFETIME(ASFW_PlayerState, CharacterIndex);
+
+	// Loadout
+	DOREPLIFETIME(ASFW_PlayerState, OptionalSlotsLimit);
+	DOREPLIFETIME(ASFW_PlayerState, SelectedOptionalIDs);
 
 	DOREPLIFETIME(ASFW_PlayerState, Sanity);
 	DOREPLIFETIME(ASFW_PlayerState, SanityTier);
@@ -101,11 +104,115 @@ void ASFW_PlayerState::OnRep_SelectedVariantID() { OnSelectedVariantIDChanged.Br
 void ASFW_PlayerState::OnRep_IsReady() { OnReadyChanged.Broadcast(bIsReady); }
 void ASFW_PlayerState::OnRep_IsHost() { OnHostFlagChanged.Broadcast(bIsHost); }
 void ASFW_PlayerState::OnRep_CharacterIndex() { ApplyIndexToSelectedID(); }
-
 void ASFW_PlayerState::OnRep_PlayerName()
 {
 	Super::OnRep_PlayerName();
 	OnPlayerNameChanged.Broadcast(GetPlayerName());
+}
+
+// ---------- Optional equipment (server) ----------
+void ASFW_PlayerState::SanitizeOptionals(const TArray<FName>& InIDs, TArray<FName>& OutIDs) const
+{
+	OutIDs = InIDs;
+	DedupAndStripNones(OutIDs);
+	ClampToSlotLimit(OutIDs);
+}
+
+void ASFW_PlayerState::ClampToSlotLimit(TArray<FName>& InOutIDs) const
+{
+	const int32 Limit = FMath::Max(0, OptionalSlotsLimit);
+	if (InOutIDs.Num() > Limit)
+	{
+		InOutIDs.SetNum(Limit);
+	}
+}
+
+void ASFW_PlayerState::DedupAndStripNones(TArray<FName>& InOutIDs) const
+{
+	TSet<FName> Seen;
+	TArray<FName> Clean;
+	Clean.Reserve(InOutIDs.Num());
+
+	for (const FName ID : InOutIDs)
+	{
+		if (ID.IsNone()) continue;
+		if (Seen.Contains(ID)) continue;
+		Seen.Add(ID);
+		Clean.Add(ID);
+	}
+	InOutIDs = MoveTemp(Clean);
+}
+
+void ASFW_PlayerState::ServerSetSelectedOptionals_Implementation(const TArray<FName>& NewIDs)
+{
+	if (!HasAuthority()) return;
+
+	TArray<FName> Clean;
+	SanitizeOptionals(NewIDs, Clean);
+
+	if (SelectedOptionalIDs != Clean)
+	{
+		SelectedOptionalIDs = MoveTemp(Clean);
+		OnRep_SelectedOptionals();
+	}
+}
+
+void ASFW_PlayerState::ServerAddOptional_Implementation(FName OptionalID)
+{
+	if (!HasAuthority()) return;
+	if (OptionalID.IsNone()) return;
+
+	TArray<FName> Next = SelectedOptionalIDs;
+	Next.Add(OptionalID);
+	SanitizeOptionals(Next, Next);
+
+	if (SelectedOptionalIDs != Next)
+	{
+		SelectedOptionalIDs = MoveTemp(Next);
+		OnRep_SelectedOptionals();
+	}
+}
+
+void ASFW_PlayerState::ServerRemoveOptional_Implementation(FName OptionalID)
+{
+	if (!HasAuthority()) return;
+	if (OptionalID.IsNone()) return;
+
+	TArray<FName> Next = SelectedOptionalIDs;
+	Next.Remove(OptionalID);
+	// No need to sanitize beyond dedup/limit (removal already safe)
+	DedupAndStripNones(Next);
+
+	if (SelectedOptionalIDs != Next)
+	{
+		SelectedOptionalIDs = MoveTemp(Next);
+		OnRep_SelectedOptionals();
+	}
+}
+
+void ASFW_PlayerState::ServerSetOptionalSlotsLimit_Implementation(int32 NewLimit)
+{
+	if (!HasAuthority()) return;
+
+	const int32 Clamped = FMath::Clamp(NewLimit, 0, 16); // sane upper bound
+	if (OptionalSlotsLimit != Clamped)
+	{
+		OptionalSlotsLimit = Clamped;
+
+		// Clamp any current selection to new limit
+		TArray<FName> Next = SelectedOptionalIDs;
+		ClampToSlotLimit(Next);
+		if (SelectedOptionalIDs != Next)
+		{
+			SelectedOptionalIDs = MoveTemp(Next);
+			OnRep_SelectedOptionals();
+		}
+	}
+}
+
+void ASFW_PlayerState::OnRep_SelectedOptionals()
+{
+	OnOptionalsChanged.Broadcast();
 }
 
 // ---------- Anomaly / Sanity ----------
@@ -174,7 +281,7 @@ void ASFW_PlayerState::OnRep_InRiftRoom() { OnInRiftChanged.Broadcast(bInRiftRoo
 void ASFW_PlayerState::OnRep_Blackout() { OnBlackoutChanged.Broadcast(bIsBlackedOut); }
 void ASFW_PlayerState::OnRep_SafeRoom() { OnSafeRoomChanged.Broadcast(); }
 
-// ---------- Helpers & RPCs ----------
+// ---------- Agent helpers & RPCs ----------
 int32 ASFW_PlayerState::GetAgentCount() const
 {
 	return AgentCatalog ? AgentCatalog->Agents.Num() : 0;
@@ -309,7 +416,6 @@ void ASFW_PlayerState::SanityTick()
 			UWorld* W = GetWorld();
 			APawn* MyPawn = nullptr;
 
-			// find my pawn
 			for (TActorIterator<APawn> ItPawn(W); ItPawn; ++ItPawn)
 			{
 				if (ItPawn->GetPlayerState() == this) { MyPawn = *ItPawn; break; }
@@ -323,7 +429,7 @@ void ASFW_PlayerState::SanityTick()
 					AActor* Shade = *ItShade;
 					if (FVector::DistSquared(Shade->GetActorLocation(), MyPawn->GetActorLocation()) <= R2)
 					{
-						Delta *= ShadeDrainMultiplier; // e.g. 2.5
+						Delta *= ShadeDrainMultiplier;
 						break;
 					}
 				}

@@ -17,6 +17,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnInRiftChanged, bool, bNowInRift);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBlackoutChanged, bool, bNowBlackedOut);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSafeRoomChanged);
 
+// New: fires when the optional loadout array changes (clients + server)
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnOptionalsChanged);
+
 UENUM(BlueprintType)
 enum class ESanityTier : uint8
 {
@@ -55,11 +58,37 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_CharacterIndex, BlueprintReadOnly, Category = "Appearance")
 	int32 CharacterIndex = 0;
 
+	// ---------- Optional equipment selection (Lobby) ----------
+	/** Max optional slots the player is allowed to take (server may update this from LoadoutRules). */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Loadout")
+	int32 OptionalSlotsLimit = 3;
+
+	/** Selected optional item IDs (deduped; clamped to OptionalSlotsLimit). */
+	UPROPERTY(ReplicatedUsing = OnRep_SelectedOptionals, BlueprintReadOnly, Category = "Loadout")
+	TArray<FName> SelectedOptionalIDs;
+
+	// Read access for widgets/blueprints
+	UFUNCTION(BlueprintPure, Category = "Loadout")
+	const TArray<FName>& GetSelectedOptionalIDs() const { return SelectedOptionalIDs; }
+
+	// Server-side set/modify from lobby UI
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Loadout")
+	void ServerSetSelectedOptionals(const TArray<FName>& NewIDs);
+
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Loadout")
+	void ServerAddOptional(FName OptionalID);
+
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Loadout")
+	void ServerRemoveOptional(FName OptionalID);
+
+	/** Server can update the slot limit (e.g., from data asset rules). Will clamp current selection. */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Loadout")
+	void ServerSetOptionalSlotsLimit(int32 NewLimit);
+
 	// ---------- Anomaly / sanity ----------
 	UPROPERTY(ReplicatedUsing = OnRep_Sanity, BlueprintReadOnly, Category = "Anomaly")
 	float Sanity = 100.f;
 
-	// Live tier (replicated for UI)
 	UPROPERTY(ReplicatedUsing = OnRep_SanityTier, BlueprintReadOnly, Category = "Anomaly")
 	ESanityTier SanityTier = ESanityTier::T1;
 
@@ -106,8 +135,8 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Events") FOnSanityTierChanged OnSanityTierChanged;
 	UPROPERTY(BlueprintAssignable, Category = "Events") FOnInRiftChanged OnInRiftChanged;
 	UPROPERTY(BlueprintAssignable, Category = "Events") FOnBlackoutChanged OnBlackoutChanged;
-	UPROPERTY(BlueprintAssignable, Category = "Events")
-	FOnSafeRoomChanged OnSafeRoomChanged;
+	UPROPERTY(BlueprintAssignable, Category = "Events") FOnSafeRoomChanged OnSafeRoomChanged;
+	UPROPERTY(BlueprintAssignable, Category = "Events") FOnOptionalsChanged OnOptionalsChanged;
 
 	// ---------- Lobby API (server only) ----------
 	UFUNCTION(BlueprintCallable, Category = "Lobby") void SetSelectedCharacterAndVariant(const FName& InCharacterID, const FName& InVariantID);
@@ -147,6 +176,7 @@ protected:
 	UFUNCTION() void OnRep_InRiftRoom();
 	UFUNCTION() void OnRep_Blackout();
 	UFUNCTION() void OnRep_SafeRoom();
+	UFUNCTION() void OnRep_SelectedOptionals();
 
 	virtual void OnRep_PlayerName() override;
 
@@ -161,6 +191,11 @@ protected:
 
 	// Passive drift tick (server)
 	void SanityTick();
+
+	// --- Loadout helpers (server only) ---
+	void SanitizeOptionals(const TArray<FName>& InIDs, TArray<FName>& OutIDs) const;
+	void ClampToSlotLimit(TArray<FName>& InOutIDs) const;
+	void DedupAndStripNones(TArray<FName>& InOutIDs) const;
 
 	UPROPERTY(EditAnywhere, Category = "Sanity")
 	TSubclassOf<AActor> ShadeClass;

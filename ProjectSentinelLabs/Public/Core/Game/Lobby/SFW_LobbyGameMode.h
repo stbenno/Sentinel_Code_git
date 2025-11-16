@@ -8,13 +8,12 @@
 
 class ASFW_LobbyGameState;
 class ASFW_PlayerState;
-// --- NEW: forward declare catalog ---
 class USFW_AgentCatalog;
 class USFW_GameInstance;
 
 /**
- * Lobby GameMode: manages host designation, roster updates, and starting the match
- * when a map is selected and all present players are Ready (supports 1–4 players).
+ * Lobby GameMode: manages host designation, roster/map changes, and starting the match.
+ * Supports 1–4 players, optional host-gate, and delayed server travel.
  */
 UCLASS()
 class PROJECTSENTINELLABS_API ASFW_LobbyGameMode : public AGameMode
@@ -29,41 +28,67 @@ public:
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual void Logout(AController* Exiting) override;
 
+	/** Host presses "Start" in the lobby UI (Server authority). */
+	UFUNCTION(BlueprintCallable, Category = "Lobby")
+	void HostRequestStart(APlayerController* RequestingPC);
+
 protected:
-	/** Re-checks whether we can leave the lobby (map selected + all present players are ready). */
+	/** Re-checks whether we can leave the lobby (map + readiness + host-gate). */
 	UFUNCTION() void EvaluateStartConditions();
 
 	/** Roster/ready changed -> re-evaluate. */
 	UFUNCTION() void HandleRosterUpdated();
 
-	// Delay before traveling so clients can show the overlay
-	UPROPERTY(EditDefaultsOnly, Category = "Lobby")
+	/** Current map changed -> re-evaluate. */
+	UFUNCTION() void HandleMapChanged(FName NewMap);
+
+	/** Optional allowlist validation for MapId. */
+	bool IsMapAllowed(FName MapId) const;
+
+	/** Resolve MapId to travel URL. If no mapping, MapId is used as the URL. */
+	FString ResolveMapURL(FName MapId) const;
+
+	/** Execute server travel after TravelDelaySeconds. */
+	UFUNCTION() void DoServerTravel();
+
+	/** Persist per-player pre-match selections to GameInstance before traveling. */
+	void SavePreMatchDataForAllPlayers();
+
+protected:
+	// ---------- Start rules ----------
+	/** Minimum players required to start. Set to 1 to allow solo. */
+	UPROPERTY(EditDefaultsOnly, Category = "Lobby|Rules")
+	int32 MinPlayersToStart = 1;
+
+	/** Require all present players to be Ready. */
+	UPROPERTY(EditDefaultsOnly, Category = "Lobby|Rules")
+	bool bRequireAllReady = true;
+
+	/** Require the host to press Start. If false, auto-start when ready. */
+	UPROPERTY(EditDefaultsOnly, Category = "Lobby|Rules")
+	bool bHostMustStart = true;
+
+	/** Sticky flag for this session; set by HostRequestStart(). */
+	UPROPERTY(VisibleAnywhere, Category = "Lobby|Rules")
+	bool bHostRequestedStart = false;
+
+	/** Delay before travel so clients can display a transition overlay. */
+	UPROPERTY(EditDefaultsOnly, Category = "Lobby|Rules")
 	float TravelDelaySeconds = 1.0f;
 
 	FTimerHandle TravelTimerHandle;
 
-	UFUNCTION()
-	void DoServerTravel();
+	// ---------- Maps ----------
+	/** Optional allowlist; if empty, any MapId/URL is accepted. */
+	UPROPERTY(EditDefaultsOnly, Category = "Lobby|Maps")
+	TSet<FName> AllowedMaps;
 
-	/** Current map changed -> re-evaluate. */
-	UFUNCTION() void HandleMapChanged(FName NewMap);
-
-	/** Resolve a MapId to a travel URL (or return the MapId if you pass full paths). */
-	FString ResolveMapURL(FName MapId) const;
-
-	/** Minimum players required to start (set to 1 to allow solo). */
-	UPROPERTY(EditDefaultsOnly, Category = "Lobby")
-	int32 MinPlayersToStart = 1;
-
-	/** Optional routing table (Id -> URL). If empty, the MapId string is used directly. */
-	UPROPERTY(EditDefaultsOnly, Category = "Lobby")
+	/** Optional routing table (Id -> URL). If empty, MapId is used directly. */
+	UPROPERTY(EditDefaultsOnly, Category = "Lobby|Maps")
 	TMap<FName, FString> MapIdToURL;
 
-	// --- NEW: assign in BP to your DA_AgentCatalog asset ---
+	// ---------- Agents / Characters ----------
+	/** Assign your DA_AgentCatalog (used to seed player selection on join). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Agents")
 	TObjectPtr<USFW_AgentCatalog> AgentCatalog = nullptr;
-	// --- NEW END ---
-
-	// --- NEW: save everyone’s selection into GameInstance before traveling
-	void SavePreMatchDataForAllPlayers();
 };
