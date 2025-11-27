@@ -105,8 +105,8 @@ void USFW_LampControllerComponent::ApplyMaterialOn()
 		{
 			M->SetMaterial(MaterialIndex, OnMaterial);
 			M->MarkRenderStateDirty();
-			UE_LOG(LogLampCtrl, Log, TEXT("[%s] MatSwap idx=%d -> %s"),
-				*GetOwner()->GetName(), MaterialIndex, *GetNameSafe(OnMaterial));
+			//UE_LOG(LogLampCtrl, Log, TEXT("[%s] MatSwap idx=%d -> %s"),
+				//*GetOwner()->GetName(), MaterialIndex, *GetNameSafe(OnMaterial));
 		}
 	}
 }
@@ -119,8 +119,8 @@ void USFW_LampControllerComponent::ApplyMaterialOff()
 		{
 			M->SetMaterial(MaterialIndex, OffMaterial);
 			M->MarkRenderStateDirty();
-			UE_LOG(LogLampCtrl, Log, TEXT("[%s] MatSwap idx=%d -> %s"),
-				*GetOwner()->GetName(), MaterialIndex, *GetNameSafe(OffMaterial));
+			//UE_LOG(LogLampCtrl, Log, TEXT("[%s] MatSwap idx=%d -> %s"),
+				//*GetOwner()->GetName(), MaterialIndex, *GetNameSafe(OffMaterial));
 		}
 	}
 }
@@ -217,10 +217,10 @@ void USFW_LampControllerComponent::ApplyEmissive(float Scalar)
 		}
 	}
 
-	UE_LOG(LogLampCtrl, Log, TEXT("[%s] Emissive %s = %.2f"),
+	/*UE_LOG(LogLampCtrl, Log, TEXT("[%s] Emissive %s = %.2f"),
 		*GetOwner()->GetName(),
 		*EmissiveParamName.ToString(),
-		Scalar);
+		Scalar);    */
 }
 
 UMeshComponent* USFW_LampControllerComponent::ResolveMesh() const

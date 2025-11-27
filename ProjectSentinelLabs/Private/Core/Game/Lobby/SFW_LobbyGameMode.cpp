@@ -16,8 +16,8 @@ ASFW_LobbyGameMode::ASFW_LobbyGameMode()
 	bUseSeamlessTravel = false;
 
 	// Example route table (adjust or replace from UI with full URLs)
-	MapIdToURL.Add(FName("Map_01"), TEXT("/Game/Variant_Horror/Lvl_HorrorTest?listen"));
-	MapIdToURL.Add(FName("Map_03"), TEXT("/Game/Core/Game/Levels/Map_3?listen"));
+	MapIdToURL.Add(FName("Map_01"), TEXT("/Game/Core/Game/Levels/blackout"));
+	MapIdToURL.Add(FName("Map_03"), TEXT("/Game/Core/Game/Levels/Map_3"));
 
 	// Optional allowlist
 	AllowedMaps = { FName("Map_01"), FName("Map_03") };
@@ -35,6 +35,7 @@ void ASFW_LobbyGameMode::BeginPlay()
 	}
 
 	bHostRequestedStart = false;
+	bTravelTriggered = false;
 }
 
 void ASFW_LobbyGameMode::PostLogin(APlayerController* NewPlayer)
@@ -52,7 +53,10 @@ void ASFW_LobbyGameMode::PostLogin(APlayerController* NewPlayer)
 		if (ASFW_PlayerState* PS = NewPlayer ? NewPlayer->GetPlayerState<ASFW_PlayerState>() : nullptr)
 		{
 			// Reset ready on join (authoritative)
-			if (PS->bIsReady) { PS->SetIsReady(false); }
+			if (PS->bIsReady)
+			{
+				PS->SetIsReady(false);
+			}
 
 			// Seed agent catalog + default choice on server
 			PS->AgentCatalog = AgentCatalog;
@@ -74,7 +78,6 @@ void ASFW_LobbyGameMode::PostLogin(APlayerController* NewPlayer)
 			PS->ServerSetIsHost(NumPlayersNow == 1);
 		}
 	}
-	
 
 	EvaluateStartConditions();
 }
@@ -108,8 +111,15 @@ void ASFW_LobbyGameMode::Logout(AController* Exiting)
 			{
 				if (ASFW_PlayerState* PS = PC->GetPlayerState<ASFW_PlayerState>())
 				{
-					if (!bPromoted) { PS->ServerSetIsHost(true);  bPromoted = true; }
-					else { PS->ServerSetIsHost(false); }
+					if (!bPromoted)
+					{
+						PS->ServerSetIsHost(true);
+						bPromoted = true;
+					}
+					else
+					{
+						PS->ServerSetIsHost(false);
+					}
 				}
 			}
 		}
@@ -122,7 +132,19 @@ void ASFW_LobbyGameMode::Logout(AController* Exiting)
 
 void ASFW_LobbyGameMode::HostRequestStart(APlayerController* RequestingPC)
 {
-	if (!HasAuthority()) return;
+	UE_LOG(LogTemp, Log, TEXT("LobbyGM::HostRequestStart called by %s"),
+		RequestingPC ? *RequestingPC->GetName() : TEXT("nullptr"));
+
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (bTravelTriggered)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("HostRequestStart ignored: travel already triggered."));
+		return;
+	}
 
 	const ASFW_PlayerState* PS = RequestingPC ? RequestingPC->GetPlayerState<ASFW_PlayerState>() : nullptr;
 	if (!PS || !PS->GetIsHost())
@@ -137,7 +159,10 @@ void ASFW_LobbyGameMode::HostRequestStart(APlayerController* RequestingPC)
 
 bool ASFW_LobbyGameMode::IsMapAllowed(FName MapId) const
 {
-	if (AllowedMaps.Num() == 0) return true;
+	if (AllowedMaps.Num() == 0)
+	{
+		return true;
+	}
 	return AllowedMaps.Contains(MapId);
 }
 
@@ -153,21 +178,48 @@ void ASFW_LobbyGameMode::HandleRosterUpdated()
 
 void ASFW_LobbyGameMode::EvaluateStartConditions()
 {
-	if (!HasAuthority()) return;
+	UE_LOG(LogTemp, Log, TEXT("LobbyGM::EvaluateStartConditions invoked"));
+
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (bTravelTriggered)
+	{
+		UE_LOG(LogTemp, Log, TEXT("LobbyGM::EvaluateStartConditions: Travel already triggered, ignoring."));
+		return;
+	}
 
 	ASFW_LobbyGameState* LGS = GetGameState<ASFW_LobbyGameState>();
-	if (!LGS) return;
+	if (!LGS)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("LobbyGM::EvaluateStartConditions: No LobbyGameState"));
+		return;
+	}
 
 	// Only start from Waiting
-	if (LGS->LobbyPhase != ESFWLobbyPhase::Waiting) return;
+	if (LGS->LobbyPhase != ESFWLobbyPhase::Waiting)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("LobbyGM::EvaluateStartConditions: Phase is %d (not Waiting), ignoring."),
+			(int32)LGS->LobbyPhase);
+		return;
+	}
 
 	// Map must be selected and allowed
-	if (LGS->CurrentMap.IsNone() || !IsMapAllowed(LGS->CurrentMap)) return;
+	if (LGS->CurrentMap.IsNone() || !IsMapAllowed(LGS->CurrentMap))
+	{
+		return;
+	}
 
 	// Player count
 	const TArray<APlayerState*>& Players = LGS->PlayerArray;
 	const int32 PlayerCount = Players.Num();
-	if (PlayerCount < MinPlayersToStart) return;
+	if (PlayerCount < MinPlayersToStart)
+	{
+		return;
+	}
 
 	// Everyone Ready (if required)
 	if (bRequireAllReady)
@@ -175,33 +227,47 @@ void ASFW_LobbyGameMode::EvaluateStartConditions()
 		for (APlayerState* PSBase : Players)
 		{
 			const ASFW_PlayerState* PS = Cast<ASFW_PlayerState>(PSBase);
-			if (!PS || !PS->bIsReady) return;
+			if (!PS || !PS->bIsReady)
+			{
+				return;
+			}
 		}
 	}
 
 	// Host-gate (if required)
-	if (bHostMustStart && !bHostRequestedStart) return;
-
-	// Lock and travel (delayed)
-	LGS->SetLobbyPhase(ESFWLobbyPhase::Locked);
-
-	const FString URL = ResolveMapURL(LGS->CurrentMap);
-	if (URL.IsEmpty())
+	if (bHostMustStart && !bHostRequestedStart)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("EvaluateStartConditions: No URL for map '%s'"), *LGS->CurrentMap.ToString());
-		LGS->SetLobbyPhase(ESFWLobbyPhase::Waiting);
 		return;
 	}
 
+	// Resolve target URL before we commit
+	const FString URL = ResolveMapURL(LGS->CurrentMap);
+	if (URL.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("LobbyGM::EvaluateStartConditions: No URL for map '%s'"),
+			*LGS->CurrentMap.ToString());
+		return;
+	}
+
+	// Persist per-player choices for the match
+	SavePreMatchDataForAllPlayers();
+
+	// Lock lobby and mark that we've triggered travel
+	LGS->SetLobbyPhase(ESFWLobbyPhase::Locked);
+	bTravelTriggered = true;
+
+	UE_LOG(LogTemp, Log,
+		TEXT("LobbyGM::EvaluateStartConditions -> conditions met, locking lobby and scheduling travel."));
+
+	// Single delayed call to DoServerTravel
+	GetWorldTimerManager().ClearTimer(TravelTimerHandle);
 	GetWorldTimerManager().SetTimer(
 		TravelTimerHandle,
-		FTimerDelegate::CreateWeakLambda(this, [this]()
-			{
-				DoServerTravel();
-			}),
+		this,
+		&ASFW_LobbyGameMode::DoServerTravel,
 		TravelDelaySeconds,
-		false
-	);
+		false);
 }
 
 FString ASFW_LobbyGameMode::ResolveMapURL(FName MapId) const
@@ -215,51 +281,99 @@ FString ASFW_LobbyGameMode::ResolveMapURL(FName MapId) const
 
 void ASFW_LobbyGameMode::DoServerTravel()
 {
-	if (!HasAuthority()) return;
+	if (!HasAuthority())
+	{
+		return;
+	}
 
-	ASFW_LobbyGameState* LGS = GetGameState<ASFW_LobbyGameState>();
-	if (!LGS) return;
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("LobbyGM::DoServerTravel: No World"));
+		return;
+	}
 
-	const FString URL = ResolveMapURL(LGS->CurrentMap);
-	if (URL.IsEmpty()) return;
+	ASFW_LobbyGameState* LobbyGS = GetGameState<ASFW_LobbyGameState>();
+	if (!LobbyGS)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("LobbyGM::DoServerTravel: No LobbyGameState"));
+		return;
+	}
 
-	// Snapshot lobby selections before leaving
-	SavePreMatchDataForAllPlayers();
+	FName MapId = LobbyGS->CurrentMap;
+	if (MapId.IsNone())
+	{
+		MapId = FName(TEXT("Map_03")); // fallback
+	}
 
-	GetWorld()->ServerTravel(URL); // include ?listen in MapIdToURL values
+	const FString URL = ResolveMapURL(MapId);
+
+	UE_LOG(LogTemp, Log,
+		TEXT("LobbyGM::DoServerTravel: Travelling to URL '%s' (MapId '%s')"),
+		*URL, *MapId.ToString());
+
+	bUseSeamlessTravel = false;
+
+	// IMPORTANT: relative travel, not absolute
+	World->ServerTravel(URL, /*bAbsolute=*/false);
+	// or just: World->ServerTravel(URL);
 }
+
+
+
 
 void ASFW_LobbyGameMode::SavePreMatchDataForAllPlayers()
 {
-	if (!HasAuthority()) return;
+	if (!HasAuthority())
+	{
+		return;
+	}
 
 	USFW_GameInstance* GI = GetGameInstance<USFW_GameInstance>();
-	if (!GI) return;
+	if (!GI)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SavePreMatchDataForAllPlayers: No GameInstance"));
+		return;
+	}
+
+	GI->PreMatchCache.Empty();
 
 	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
 	{
-		if (APlayerController* PC = It->Get())
+		APlayerController* PC = It->Get();
+		if (!PC) continue;
+
+		if (ASFW_PlayerState* PS = PC->GetPlayerState<ASFW_PlayerState>())
 		{
-			if (ASFW_PlayerState* PS = PC->GetPlayerState<ASFW_PlayerState>())
+			FSFWPreMatchData Data;
+			Data.CharacterID = PS->SelectedCharacterID;
+			Data.VariantID = PS->SelectedVariantID;
+
+			const TArray<FName>& SelectedEquip = PS->GetSelectedEquipmentIDs();
+			Data.EquipmentIDs = SelectedEquip;
+
+			if (Data.EquipmentIDs.Num() == 0)
 			{
-				FSFWPreMatchData Data;
-				Data.CharacterID = PS->SelectedCharacterID;
-				Data.VariantID = PS->SelectedVariantID;
-				
-				Data.EquipmentIDs = PS->GetSelectedOptionalIDs();  // optional items chosen in lobby
+				UE_LOG(LogTemp, Warning,
+					TEXT("SavePreMatchDataForAllPlayers: Player %s has NO selected equipment."),
+					*PS->GetPlayerName());
+			}
 
+			const FString Key = USFW_GameInstance::MakePlayerKey(PS);
+			if (!Key.IsEmpty())
+			{
+				GI->SetPreMatchData(Key, Data);
 
-				// NOTE: Optional equipment IDs will be added once PlayerState supports selection.
-
-				const FString Key = USFW_GameInstance::MakePlayerKey(PS);
-				if (!Key.IsEmpty())
-				{
-					GI->SetPreMatchData(Key, Data);
-				}
+				UE_LOG(LogTemp, Log,
+					TEXT("SavePreMatchDataForAllPlayers: Saved entry for %s: Char=%s Variant=%s EquipCount=%d"),
+					*Key,
+					*Data.CharacterID.ToString(),
+					*Data.VariantID.ToString(),
+					Data.EquipmentIDs.Num());
 			}
 		}
 	}
 
-	// Clear sticky flag after a start is executed.
 	bHostRequestedStart = false;
 }
+

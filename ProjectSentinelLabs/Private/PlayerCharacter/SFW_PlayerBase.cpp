@@ -283,6 +283,11 @@ void ASFW_PlayerBase::UpdateMeshVisibility()
 
 void ASFW_PlayerBase::Server_Interact_Implementation(AActor* Target)
 {
+	UE_LOG(LogTemp, Log, TEXT("[Interact] Server_Interact_Implementation: Owner=%s Target=%s (%s)"),
+		*GetName(),
+		*GetNameSafe(Target),
+		Target ? *Target->GetClass()->GetName() : TEXT("None"));
+
 	if (!IsValid(Target)) return;
 
 	if (Target->GetClass()->ImplementsInterface(USFW_InteractableInterface::StaticClass()))
@@ -291,8 +296,12 @@ void ASFW_PlayerBase::Server_Interact_Implementation(AActor* Target)
 	}
 }
 
+
 void ASFW_PlayerBase::TryInteract()
 {
+	UE_LOG(LogTemp, Log, TEXT("[Interact] %s pressed Interact"),
+		*GetName());
+
 	if (Interaction)
 	{
 		Interaction->TryInteract();

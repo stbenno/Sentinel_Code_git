@@ -23,12 +23,6 @@ ASFW_Camera::ASFW_Camera()
 
 	// Root skeletal mesh comes from EquippableBase::Mesh
 
-	CameraMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CameraMesh"));
-	CameraMesh->SetupAttachment(GetMesh());
-	CameraMesh->SetIsReplicated(true);
-	CameraMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	CameraMesh->SetCastShadow(true);
-	CameraMesh->SetVisibility(true, true);
 }
 
 UPrimitiveComponent* ASFW_Camera::GetPhysicsComponent() const

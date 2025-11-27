@@ -17,8 +17,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnInRiftChanged, bool, bNowInRift);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBlackoutChanged, bool, bNowBlackedOut);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSafeRoomChanged);
 
-// New: fires when the optional loadout array changes (clients + server)
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnOptionalsChanged);
+// New: fires when the equipment selection array changes (clients + server)
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnEquipmentSelectionChanged);
 
 UENUM(BlueprintType)
 enum class ESanityTier : uint8
@@ -58,32 +58,18 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_CharacterIndex, BlueprintReadOnly, Category = "Appearance")
 	int32 CharacterIndex = 0;
 
-	// ---------- Optional equipment selection (Lobby) ----------
-	/** Max optional slots the player is allowed to take (server may update this from LoadoutRules). */
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Loadout")
-	int32 OptionalSlotsLimit = 3;
+	// ---------- Equipment selection (Lobby) ----------
+	/** Per-player equipment selection, to be read by GameInstance / LobbyGM when building team loadout. */
+	UPROPERTY(ReplicatedUsing = OnRep_SelectedEquipmentIDs, BlueprintReadOnly, Category = "Loadout")
+	TArray<FName> SelectedEquipmentIDs;
 
-	/** Selected optional item IDs (deduped; clamped to OptionalSlotsLimit). */
-	UPROPERTY(ReplicatedUsing = OnRep_SelectedOptionals, BlueprintReadOnly, Category = "Loadout")
-	TArray<FName> SelectedOptionalIDs;
-
-	// Read access for widgets/blueprints
+	/** Read access for widgets/blueprints. */
 	UFUNCTION(BlueprintPure, Category = "Loadout")
-	const TArray<FName>& GetSelectedOptionalIDs() const { return SelectedOptionalIDs; }
+	const TArray<FName>& GetSelectedEquipmentIDs() const { return SelectedEquipmentIDs; }
 
-	// Server-side set/modify from lobby UI
+	/** Server-side setter called from lobby UI to update the player's equipment selection. */
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Loadout")
-	void ServerSetSelectedOptionals(const TArray<FName>& NewIDs);
-
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Loadout")
-	void ServerAddOptional(FName OptionalID);
-
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Loadout")
-	void ServerRemoveOptional(FName OptionalID);
-
-	/** Server can update the slot limit (e.g., from data asset rules). Will clamp current selection. */
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Loadout")
-	void ServerSetOptionalSlotsLimit(int32 NewLimit);
+	void ServerSetSelectedEquipment(const TArray<FName>& NewEquipmentIDs);
 
 	// ---------- Anomaly / sanity ----------
 	UPROPERTY(ReplicatedUsing = OnRep_Sanity, BlueprintReadOnly, Category = "Anomaly")
@@ -136,33 +122,73 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Events") FOnInRiftChanged OnInRiftChanged;
 	UPROPERTY(BlueprintAssignable, Category = "Events") FOnBlackoutChanged OnBlackoutChanged;
 	UPROPERTY(BlueprintAssignable, Category = "Events") FOnSafeRoomChanged OnSafeRoomChanged;
-	UPROPERTY(BlueprintAssignable, Category = "Events") FOnOptionalsChanged OnOptionalsChanged;
+	UPROPERTY(BlueprintAssignable, Category = "Events") FOnEquipmentSelectionChanged OnEquipmentSelectionChanged;
 
 	// ---------- Lobby API (server only) ----------
-	UFUNCTION(BlueprintCallable, Category = "Lobby") void SetSelectedCharacterAndVariant(const FName& InCharacterID, const FName& InVariantID);
-	UFUNCTION(BlueprintCallable, Category = "Lobby") void SetIsReady(bool bNewReady);
-	UFUNCTION(BlueprintCallable, Category = "Lobby") void ResetForLobby();
-	UFUNCTION(BlueprintPure, Category = "Lobby") bool GetIsHost() const { return bIsHost; }
+	UFUNCTION(BlueprintCallable, Category = "Lobby")
+	void SetSelectedCharacterAndVariant(const FName& InCharacterID, const FName& InVariantID);
+
+	UFUNCTION(BlueprintCallable, Category = "Lobby")
+	void SetIsReady(bool bNewReady);
+
+	UFUNCTION(BlueprintCallable, Category = "Lobby")
+	void ResetForLobby();
+
+	UFUNCTION(BlueprintPure, Category = "Lobby")
+	bool GetIsHost() const { return bIsHost; }
+
 	void ServerSetIsHost(bool bNewIsHost);
 
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Appearance") void ServerSetCharacterIndex(int32 NewIndex);
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Appearance") void ServerCycleCharacter(int32 Direction);
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Appearance") void ServerSetCharacterByID(FName InCharacterID);
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Appearance")
+	void ServerSetCharacterIndex(int32 NewIndex);
+
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Appearance")
+	void ServerCycleCharacter(int32 Direction);
+
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Appearance")
+	void ServerSetCharacterByID(FName InCharacterID);
 
 	// ---------- Anomaly API (server only) ----------
-	UFUNCTION(BlueprintCallable, Category = "Anomaly") void ApplySanityDelta(float Delta);
-	UFUNCTION(BlueprintCallable, Category = "Anomaly") void SetSanity(float NewValue);
-	UFUNCTION(BlueprintCallable, Category = "Anomaly") void SetInRiftRoom(bool bIn);
-	UFUNCTION(BlueprintCallable, Category = "Anomaly") void StartBlackout(float DurationSeconds);
-	UFUNCTION(BlueprintCallable, Category = "Anomaly") void ClearBlackout();
-	UFUNCTION(BlueprintCallable, Category = "Anomaly") void SetInSafeRoom(bool bIn);
+	UFUNCTION(BlueprintCallable, Category = "Anomaly")
+	void ApplySanityDelta(float Delta);
 
-	UFUNCTION(BlueprintPure, Category = "Anomaly") bool IsStandingAliveForExtraction() const { return !bIsBlackedOut; }
-	UFUNCTION(BlueprintPure, Category = "Anomaly") ESanityTier GetSanityTier() const { return SanityTier; }
+	UFUNCTION(BlueprintCallable, Category = "Anomaly")
+	void SetSanity(float NewValue);
+
+	UFUNCTION(BlueprintCallable, Category = "Anomaly")
+	void SetInRiftRoom(bool bIn);
+
+	UFUNCTION(BlueprintCallable, Category = "Anomaly")
+	void StartBlackout(float DurationSeconds);
+
+	UFUNCTION(BlueprintCallable, Category = "Anomaly")
+	void ClearBlackout();
+
+	UFUNCTION(BlueprintCallable, Category = "Anomaly")
+	void SetInSafeRoom(bool bIn);
+
+	UFUNCTION(BlueprintPure, Category = "Anomaly")
+	bool IsStandingAliveForExtraction() const { return !bIsBlackedOut; }
+
+	UFUNCTION(BlueprintPure, Category = "Anomaly")
+	ESanityTier GetSanityTier() const { return SanityTier; }
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	/*Loadout for Lobby Items*/
+
+
+// Toggle a single item on/off from the client.
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Loadout")
+	void ServerSetItemChecked(FName ItemId, bool bIsChecked);
+
+	// Returns a human-readable summary: "EMF Device, REMPOD, Headlamp"
+	// for the current SelectedEquipmentIDs.
+	UFUNCTION(BlueprintPure, Category = "Loadout")
+	FText GetSelectedEquipmentSummary() const;
+
 
 protected:
 	// ----- RepNotifies -----
@@ -176,7 +202,9 @@ protected:
 	UFUNCTION() void OnRep_InRiftRoom();
 	UFUNCTION() void OnRep_Blackout();
 	UFUNCTION() void OnRep_SafeRoom();
-	UFUNCTION() void OnRep_SelectedOptionals();
+	UFUNCTION() void OnRep_SelectedEquipmentIDs();
+
+	
 
 	virtual void OnRep_PlayerName() override;
 
@@ -186,16 +214,15 @@ protected:
 	void ApplyIndexToSelectedID();
 	int32 FindIndexByAgentID(FName InCharacterID) const;
 
+	// Equipment helpers (server only)
+	void SanitizeEquipmentArray(const TArray<FName>& InIDs, TArray<FName>& OutIDs) const;
+	void DedupAndStripNones(TArray<FName>& InOutIDs) const;
+
 	// Sanity tier recompute (server sets + replicates)
 	void RecomputeAndApplySanityTier();
 
 	// Passive drift tick (server)
 	void SanityTick();
-
-	// --- Loadout helpers (server only) ---
-	void SanitizeOptionals(const TArray<FName>& InIDs, TArray<FName>& OutIDs) const;
-	void ClampToSlotLimit(TArray<FName>& InOutIDs) const;
-	void DedupAndStripNones(TArray<FName>& InOutIDs) const;
 
 	UPROPERTY(EditAnywhere, Category = "Sanity")
 	TSubclassOf<AActor> ShadeClass;

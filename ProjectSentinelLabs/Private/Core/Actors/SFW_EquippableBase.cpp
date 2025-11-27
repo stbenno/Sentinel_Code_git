@@ -12,22 +12,28 @@ ASFW_EquippableBase::ASFW_EquippableBase()
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	bNetUseOwnerRelevancy = true;
-
 	SetReplicateMovement(true);
 
-	Mesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Mesh"));
+	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
+
 	Mesh->SetIsReplicated(true);
+	Mesh->SetMobility(EComponentMobility::Movable);
+
+	// Start in a non-physics, non-colliding state for “in hand”
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetSimulatePhysics(false);
+	Mesh->SetEnableGravity(false);
 
 	InteractionCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionCollision"));
-	InteractionCollision->SetupAttachment(RootComponent);
+	InteractionCollision->SetupAttachment(Mesh);
 	InteractionCollision->SetBoxExtent(FVector(10.f));
-
 	InteractionCollision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionCollision->SetCollisionResponseToAllChannels(ECR_Ignore);
 	InteractionCollision->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 }
+
+
 
 void ASFW_EquippableBase::BeginPlay()
 {
@@ -44,31 +50,22 @@ void ASFW_EquippableBase::BeginPlay()
 
 void ASFW_EquippableBase::OnEquipped(ACharacter* NewOwnerChar)
 {
+	UE_LOG(LogTemp, Log, TEXT("[Equippable] OnEquipped %s -> Owner %s Slot=%d Socket=%s"),
+		*GetName(),
+		*GetNameSafe(NewOwnerChar),
+		(int32)EquipSlot,
+		*GetAttachSocketName().ToString());
+
 	if (NewOwnerChar)
 	{
 		SetOwner(NewOwnerChar);
+		AttachToCharacter(NewOwnerChar, GetAttachSocketName());
 	}
 
-	AttachToCharacter(NewOwnerChar, GetAttachSocketName());
-
-	if (UPrimitiveComponent* Phys = GetPhysicsComponent())
-	{
-		Phys->SetSimulatePhysics(false);
-		Phys->SetEnableGravity(false);
-		Phys->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-		if (bHasCachedPhysicsRelativeTransform)
-		{
-			if (Phys != GetRootComponent())
-			{
-				Phys->AttachToComponent(
-					GetRootComponent(),
-					FAttachmentTransformRules::KeepRelativeTransform);
-			}
-
-			Phys->SetRelativeTransform(InitialPhysicsRelativeTransform);
-		}
-	}
+	// In hand: no physics, no collision
+	Mesh->SetSimulatePhysics(false);
+	Mesh->SetEnableGravity(false);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	if (InteractionCollision)
 	{
@@ -77,6 +74,8 @@ void ASFW_EquippableBase::OnEquipped(ACharacter* NewOwnerChar)
 
 	SetActorHiddenInGame(false);
 }
+
+
 
 void ASFW_EquippableBase::OnUnequipped()
 {
@@ -86,10 +85,13 @@ void ASFW_EquippableBase::OnUnequipped()
 	if (InteractionCollision)
 	{
 		InteractionCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		InteractionCollision->SetHiddenInGame(true);
 	}
 
-	DetachFromCharacter();
+	// Detach the ACTOR, not an individual component
+	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 }
+
 
 void ASFW_EquippableBase::OnDropped(const FVector& DropLocation, const FVector& TossVelocity)
 {
@@ -98,22 +100,33 @@ void ASFW_EquippableBase::OnDropped(const FVector& DropLocation, const FVector& 
 	SetActorHiddenInGame(false);
 	SetActorEnableCollision(true);
 
-	if (UPrimitiveComponent* Phys = GetPhysicsComponent())
+	// Work directly on the mesh (root)
+	if (Mesh)
 	{
-		Phys->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-		Phys->SetWorldLocation(DropLocation);
+		Mesh->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
 
-		Phys->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-		Phys->SetCollisionResponseToAllChannels(ECR_Block);
+		// Put it where we want
+		Mesh->SetWorldLocation(DropLocation);
 
-		Phys->SetSimulatePhysics(true);
-		Phys->SetEnableGravity(true);
+		// Give it a sane collision preset for physics actors
+		Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		Mesh->SetCollisionResponseToAllChannels(ECR_Block);
 
-		Phys->SetPhysicsLinearVelocity(TossVelocity, true);
-		Phys->WakeAllRigidBodies();
+		// Physics on
+		Mesh->SetSimulatePhysics(true);
+		Mesh->SetEnableGravity(true);
+
+		Mesh->SetPhysicsLinearVelocity(TossVelocity, true);
+		Mesh->WakeAllRigidBodies();
+
+		UE_LOG(LogTemp, Log, TEXT("[Equippable] OnDropped %s Sim=%d Grav=%d"),
+			*GetName(),
+			Mesh->IsSimulatingPhysics() ? 1 : 0,
+			Mesh->IsGravityEnabled() ? 1 : 0);
 	}
 	else
 	{
+		// Fallback, but you shouldn't hit this
 		SetActorLocation(DropLocation);
 	}
 
@@ -122,6 +135,10 @@ void ASFW_EquippableBase::OnDropped(const FVector& DropLocation, const FVector& 
 		InteractionCollision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	}
 }
+
+
+
+
 
 void ASFW_EquippableBase::Multicast_OnDropped_Implementation(const FVector& DropLocation, const FVector& TossVelocity)
 {
@@ -134,33 +151,30 @@ void ASFW_EquippableBase::Multicast_OnDropped_Implementation(const FVector& Drop
 
 void ASFW_EquippableBase::OnPlaced(const FTransform& WorldTransform)
 {
-	DetachFromCharacter();
+	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 
 	SetActorHiddenInGame(false);
 	SetActorEnableCollision(true);
 
+	SetActorTransform(WorldTransform);
+
 	if (UPrimitiveComponent* Phys = GetPhysicsComponent())
 	{
-		Phys->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-		Phys->SetWorldTransform(WorldTransform);
-
 		Phys->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		Phys->SetCollisionResponseToAllChannels(ECR_Block);
 
-		// Placed items are typically static
 		Phys->SetSimulatePhysics(false);
 		Phys->SetEnableGravity(false);
-	}
-	else
-	{
-		SetActorTransform(WorldTransform);
 	}
 
 	if (InteractionCollision)
 	{
 		InteractionCollision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		InteractionCollision->SetHiddenInGame(true);
 	}
 }
+
+
 
 void ASFW_EquippableBase::Multicast_OnPlaced_Implementation(const FTransform& WorldTransform)
 {
@@ -177,6 +191,8 @@ void ASFW_EquippableBase::AttachToCharacter(ACharacter* Char, FName Socket)
 	{
 		const FAttachmentTransformRules Rules(EAttachmentRule::SnapToTarget, true);
 		AttachToComponent(CMesh, Rules, Socket);
+
+		SetActorRelativeTransform(HandOffset);
 	}
 }
 
@@ -187,7 +203,7 @@ void ASFW_EquippableBase::DetachFromCharacter()
 
 UPrimitiveComponent* ASFW_EquippableBase::GetPhysicsComponent() const
 {
-	return Cast<UPrimitiveComponent>(GetRootComponent());
+	return Mesh;
 }
 
 FName ASFW_EquippableBase::GetAttachSocketName() const
@@ -219,28 +235,45 @@ FText ASFW_EquippableBase::GetPromptText_Implementation() const
 
 void ASFW_EquippableBase::Interact_Implementation(AController* InstigatorController)
 {
-	UE_LOG(LogTemp, Log, TEXT("Interact on %s (Auth=%d)"),
+	UE_LOG(LogTemp, Log, TEXT("[Equippable] Interact on %s (Auth=%d, Controller=%s)"),
 		*GetName(),
-		HasAuthority() ? 1 : 0);
+		HasAuthority() ? 1 : 0,
+		*GetNameSafe(InstigatorController));
 
 	if (!InstigatorController)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[Equippable] Interact aborted: no InstigatorController"));
 		return;
 	}
 
 	ACharacter* Char = Cast<ACharacter>(InstigatorController->GetPawn());
-	if (!Char) return;
+	if (!Char)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Equippable] Interact aborted: Controller has no pawn"));
+		return;
+	}
 
 	USFW_EquipmentManagerComponent* Equip =
 		Char->FindComponentByClass<USFW_EquipmentManagerComponent>();
-	if (!Equip) return;
+	if (!Equip)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Equippable] Interact aborted: No EquipmentManager on %s"),
+			*Char->GetName());
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Equippable] Interact: calling AddItemToInventory on %s (Auth=%d)"),
+		*Char->GetName(),
+		HasAuthority() ? 1 : 0);
 
 	if (!HasAuthority())
 	{
+		UE_LOG(LogTemp, Log, TEXT("[Equippable] Client path: calling Server_AddItemToInventory"));
 		Equip->Server_AddItemToInventory(this, /*bAutoEquipIfHandEmpty=*/true);
 		return;
 	}
 
+	// Server path
 	if (UPrimitiveComponent* Phys = GetPhysicsComponent())
 	{
 		Phys->SetSimulatePhysics(false);
@@ -250,5 +283,7 @@ void ASFW_EquippableBase::Interact_Implementation(AController* InstigatorControl
 
 	SetOwner(Char);
 
+	UE_LOG(LogTemp, Log, TEXT("[Equippable] Server path: calling Server_AddItemToInventory directly"));
 	Equip->Server_AddItemToInventory(this, /*bAutoEquipIfHandEmpty=*/true);
 }
+

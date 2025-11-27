@@ -11,24 +11,8 @@
 
 ASFW_WalkieTalkie::ASFW_WalkieTalkie()
 {
-	PrimaryActorTick.bCanEverTick = false;
-	bReplicates = true;
-	bNetUseOwnerRelevancy = true;
-
-	// Root skeletal mesh comes from ASFW_EquippableBase (Mesh).
-	// This is the static mesh body the player sees and that uses physics when dropped.
-	WalkieMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WalkieMesh"));
-	WalkieMesh->SetupAttachment(GetMesh());
-	WalkieMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	WalkieMesh->SetCastShadow(true);
-	WalkieMesh->SetIsReplicated(true);
-	WalkieMesh->SetVisibility(true, true);
-
 	EquipSlot = ESFWEquipSlot::Hand_Tool;
-	
-
-	//SetActorHiddenInGame(true);
-	//SetActorEnableCollision(false);
+	DisplayName = NSLOCTEXT("Equippable", "WalkieTalkieName", "Walkie Talkie");
 }
 
 UPrimitiveComponent* ASFW_WalkieTalkie::GetPhysicsComponent() const

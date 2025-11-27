@@ -34,13 +34,16 @@ public:
 
 protected:
 	/** Re-checks whether we can leave the lobby (map + readiness + host-gate). */
-	UFUNCTION() void EvaluateStartConditions();
+	UFUNCTION()
+	void EvaluateStartConditions();
 
 	/** Roster/ready changed -> re-evaluate. */
-	UFUNCTION() void HandleRosterUpdated();
+	UFUNCTION()
+	void HandleRosterUpdated();
 
 	/** Current map changed -> re-evaluate. */
-	UFUNCTION() void HandleMapChanged(FName NewMap);
+	UFUNCTION()
+	void HandleMapChanged(FName NewMap);
 
 	/** Optional allowlist validation for MapId. */
 	bool IsMapAllowed(FName MapId) const;
@@ -49,13 +52,15 @@ protected:
 	FString ResolveMapURL(FName MapId) const;
 
 	/** Execute server travel after TravelDelaySeconds. */
-	UFUNCTION() void DoServerTravel();
+	UFUNCTION()
+	void DoServerTravel();
 
 	/** Persist per-player pre-match selections to GameInstance before traveling. */
 	void SavePreMatchDataForAllPlayers();
 
 protected:
 	// ---------- Start rules ----------
+
 	/** Minimum players required to start. Set to 1 to allow solo. */
 	UPROPERTY(EditDefaultsOnly, Category = "Lobby|Rules")
 	int32 MinPlayersToStart = 1;
@@ -76,9 +81,14 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Lobby|Rules")
 	float TravelDelaySeconds = 1.0f;
 
+	/** Once true, travel is locked in; prevents double-trigger. */
+	UPROPERTY()
+	bool bTravelTriggered = false;
+
 	FTimerHandle TravelTimerHandle;
 
 	// ---------- Maps ----------
+
 	/** Optional allowlist; if empty, any MapId/URL is accepted. */
 	UPROPERTY(EditDefaultsOnly, Category = "Lobby|Maps")
 	TSet<FName> AllowedMaps;
@@ -88,6 +98,7 @@ protected:
 	TMap<FName, FString> MapIdToURL;
 
 	// ---------- Agents / Characters ----------
+
 	/** Assign your DA_AgentCatalog (used to seed player selection on join). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Agents")
 	TObjectPtr<USFW_AgentCatalog> AgentCatalog = nullptr;

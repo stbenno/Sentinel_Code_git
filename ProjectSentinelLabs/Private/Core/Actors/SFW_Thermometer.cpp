@@ -14,13 +14,6 @@ ASFW_Thermometer::ASFW_Thermometer()
 	bReplicates = true;
 	bNetUseOwnerRelevancy = true;
 
-	ThermoMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ThermoMesh"));
-	ThermoMesh->SetupAttachment(GetMesh());
-	ThermoMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	ThermoMesh->SetCastShadow(true);
-	ThermoMesh->SetIsReplicated(true);
-	ThermoMesh->SetVisibility(true, true);
-
 	bIsActive = false;
 	CurrentTemperature = 20.0f;
 

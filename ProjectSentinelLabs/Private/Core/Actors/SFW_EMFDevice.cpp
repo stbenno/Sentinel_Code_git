@@ -24,27 +24,9 @@ ASFW_EMFDevice::ASFW_EMFDevice()
 	bReplicates = true;
 	bNetUseOwnerRelevancy = true;
 
-	// Root skeletal mesh comes from ASFW_EquippableBase (Mesh)
-
-	EMFMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("EMFMesh"));
-	EMFMesh->SetupAttachment(GetRootComponent());
-	EMFMesh->SetIsReplicated(true);
-
-	// Let BP / defaults drive collision when in the world.
-	// Do NOT force NoCollision here.
-	// e.g. in BP set:
-	//   CollisionEnabled = QueryAndPhysics
-	//   Visibility = Block
-	//   WorldStatic/WorldDynamic = Block
-
 	HumAudioComp = CreateDefaultSubobject<UAudioComponent>(TEXT("HumAudioComp"));
 	HumAudioComp->SetupAttachment(EMFMesh);
 	HumAudioComp->bAutoActivate = false;
-
-	// Do not hide or disable collision here; that breaks level-placed pickups.
-	// State transitions are handled in OnEquipped / OnDropped.
-	// SetActorHiddenInGame(false);
-	// SetActorEnableCollision(true);
 
 	bIsActive = false;
 	EMFLevel = 0;

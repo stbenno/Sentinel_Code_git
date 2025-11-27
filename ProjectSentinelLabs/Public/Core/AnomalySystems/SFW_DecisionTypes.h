@@ -84,7 +84,25 @@ enum class ESFWDecision : uint8
     Characteristic,
     BlackoutRoom,
     PropPulse,
-    PropToss
+    PropToss, 
+
+    // Door-focused Binder actions
+    CloseAllDoorsInRoom,   // Close every door tagged with this RoomId
+    LockAllDoorsInRoom,    // Close + lock every door in this RoomId for Duration
+
+    DoorSlamScare,         // Force a slam scare on one door near a player in RoomId
+
+    // Comms / control
+    JamRadio,              // Flip bRadioJammed on for Duration
+    DegradeRadio,          // Reduce RadioIntegrity by Magnitude (0–1 step)
+
+    // Puzzle hook (for sigils, later)
+    SigilHint, // Ask SigilSystem to do a small “hint” / pulse in RiftRoom
+
+    //Shades
+
+    SpawnShade,ShadeRoam, ShadeHunt, ShadeAlert
+
 
 };
 

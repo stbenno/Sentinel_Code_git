@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// SFW_DoorBase.h
 
 #pragma once
 
@@ -11,12 +11,13 @@
 class USceneComponent;
 class UStaticMeshComponent;
 class USphereComponent;
-class UBoxComponent;                    // + add
+class UBoxComponent;
 class UPrimitiveComponent;
 class APawn;
 class USoundBase;
 class ASFW_AnomalyDecisionSystem;
 class ASFW_DoorScareFX;
+class ASFW_ShadeCharacterBase;
 
 UENUM(BlueprintType)
 enum class EDoorState : uint8
@@ -43,7 +44,7 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	// Decision-system entry
+	// Decision-system entry (server)
 	UFUNCTION(Server, Reliable)
 	void HandleDecision(const FSFWDecisionPayload& Payload);
 
@@ -80,15 +81,15 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) USphereComponent* ProximityTrigger;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) USceneComponent* ScareFXAnchor;
 
-	// --- Interaction volume (swings with leaf) ---
+	// Interaction volume (swings with leaf)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SFW|Door|Interact")
 	UBoxComponent* InteractionBox = nullptr;
 
-	UPROPERTY(EditAnywhere, Category = "SFW|Door|Interact")      // EditInstanceOnly if you want per-instance
-		FVector InteractionBoxExtent = FVector(32, 60, 110);       // full extents; we’ll halve in code
+	UPROPERTY(EditAnywhere, Category = "SFW|Door|Interact")
+	FVector InteractionBoxExtent = FVector(32, 60, 110);
 
 	UPROPERTY(EditAnywhere, Category = "SFW|Door|Interact")
-	FVector InteractionBoxOffset = FVector(10, 0, 95);         // relative to the Door (hinge space)
+	FVector InteractionBoxOffset = FVector(10, 0, 95);
 
 	// Initial/random state
 	UPROPERTY(EditAnywhere, Category = "SFW|Door|Initial") EDoorState InitialState = EDoorState::Closed;
@@ -133,6 +134,9 @@ protected:
 	void FinishMotion();
 	void SnapTo(float YawDeg);
 	float GetYaw() const;
+
+	// New: adjust collision while animating so Shade can pass through
+	void SetDoorCollisionForAnimation(bool bAnimating);
 
 	void TryDoorScare(APawn* ApproachingPawn, bool bForce = false);
 	void StartSlamSequence(APawn* ApproachingPawn);

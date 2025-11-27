@@ -19,15 +19,6 @@ ASFW_REMPod::ASFW_REMPod()
 	// Hold in EMF-style hand by default
 	EquipSlot = ESFWEquipSlot::Hand_EMF;
 
-	// Root skeletal mesh comes from EquippableBase::Mesh
-
-	PodMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PodMesh"));
-	PodMesh->SetupAttachment(GetMesh());
-	PodMesh->SetIsReplicated(true);
-	PodMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PodMesh->SetCastShadow(true);
-	PodMesh->SetVisibility(true, true);
-
 	HumAudioComp = CreateDefaultSubobject<UAudioComponent>(TEXT("HumAudioComp"));
 	HumAudioComp->SetupAttachment(PodMesh);
 	HumAudioComp->bAutoActivate = false;

@@ -98,4 +98,7 @@ private:
 	void BindToPlayerState(ASFW_PlayerState* PS);
 	void UnbindFromPlayerState(ASFW_PlayerState* PS);
 	void RefreshLocalBindings();
+
+	/** Guard so we don't spawn UI while the world is tearing down. */
+	bool CanBroadcastToUI() const;
 };

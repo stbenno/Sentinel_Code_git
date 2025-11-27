@@ -4,7 +4,7 @@
 #include "Core/Interact/SFW_InteractionComponent.h"
 
 #include "Core/Actors/Interface/SFW_InteractableInterface.h"
-
+#include "core/Actors/SFW_EquippableBase.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -97,7 +97,8 @@ bool USFW_InteractionComponent::FindBestInteractable(AActor*& OutActor) const
 	APlayerController* PC = GetOwningPC();
 	if (!PC) return false;
 
-	FVector EyesLoc; FRotator EyesRot;
+	FVector EyesLoc;
+	FRotator EyesRot;
 	PC->GetPlayerViewPoint(EyesLoc, EyesRot);
 
 	const FVector Start = EyesLoc;
@@ -105,19 +106,51 @@ bool USFW_InteractionComponent::FindBestInteractable(AActor*& OutActor) const
 
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(InteractTrace), false, GetOwner());
 	FHitResult Hit;
-	if (!GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+
+	bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
+
+	if (bDrawDebug)
 	{
-		if (bDrawDebug) DrawDebugLine(GetWorld(), Start, End, FColor::Red, false, 0.12f, 0, 0.5f);
+		DrawDebugLine(GetWorld(), Start, End, bHit ? FColor::Cyan : FColor::Red,
+			false, 0.12f, 0, 0.8f);
+	}
+
+	if (!bHit)
+	{
+		if (bDrawDebug)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[InteractTrace] No hit"));
+		}
 		return false;
 	}
 
 	AActor* HitActor = Hit.GetActor();
-	if (bDrawDebug) DrawDebugLine(GetWorld(), Start, Hit.ImpactPoint, FColor::Cyan, false, 0.12f, 0, 0.8f);
+	UPrimitiveComponent* HitComp = Hit.Component.Get();
+
+	const bool bIsEquippable = HitActor && HitActor->IsA(ASFW_EquippableBase::StaticClass());
+	const bool bImplementsInterface =
+		HitActor && HitActor->GetClass()->ImplementsInterface(USFW_InteractableInterface::StaticClass());
+
+	if (bDrawDebug)
+	{
+		UE_LOG(LogTemp, Log,
+			TEXT("[InteractTrace] HitActor=%s Comp=%s ObjType=%d Equippable=%d ImplementsInterface=%d Dist=%.1f"),
+			HitActor ? *HitActor->GetName() : TEXT("None"),
+			HitComp ? *HitComp->GetName() : TEXT("None"),
+			HitComp ? (int32)HitComp->GetCollisionObjectType() : -1,
+			bIsEquippable ? 1 : 0,
+			bImplementsInterface ? 1 : 0,
+			FVector::Dist(EyesLoc, Hit.ImpactPoint));
+
+		DrawDebugSphere(GetWorld(), Hit.ImpactPoint,
+			6.f, 12,
+			bImplementsInterface ? FColor::Green : FColor::Red,
+			false, 0.12f);
+	}
 
 	if (!HitActor) return false;
-	if (!HitActor->GetClass()->ImplementsInterface(USFW_InteractableInterface::StaticClass())) return false;
+	if (!bImplementsInterface) return false;
 
-	// Range check (safety; the line already clamps range)
 	const float Dist = FVector::Dist(EyesLoc, Hit.ImpactPoint);
 	if (Dist > InteractRange + 2.f) return false;
 
@@ -127,28 +160,19 @@ bool USFW_InteractionComponent::FindBestInteractable(AActor*& OutActor) const
 
 void USFW_InteractionComponent::OnInteractInput()
 {
-	// Client entry. Use current focus.
-	if (!FocusedActor) return;
-
 	APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	if (!OwnerPawn) return;
 
-	// Server performs the interaction
-	if (OwnerPawn->HasAuthority())
-	{
-		if (APlayerController* PC = Cast<APlayerController>(OwnerPawn->GetController()))
-		{
-			if (ValidateServerInteract(FocusedActor, PC))
-			{
-				ISFW_InteractableInterface::Execute_Interact(FocusedActor, PC);
-			}
-		}
-	}
-	else
-	{
-		Server_TryInteract(FocusedActor);
-	}
+	if (!FocusedActor) return;
+
+	UE_LOG(LogTemp, Log, TEXT("[Interact] %s pressed Interact; FocusedActor=%s"),
+		*OwnerPawn->GetName(),
+		*FocusedActor->GetName());
+
+	// Always go through the server RPC (on listen/server this just calls _Implementation)
+	Server_TryInteract(FocusedActor);
 }
+
 
 void USFW_InteractionComponent::Server_TryInteract_Implementation(AActor* Target)
 {
@@ -179,15 +203,39 @@ bool USFW_InteractionComponent::ValidateServerInteract(AActor* Target, APlayerCo
 	APawn* Pawn = PC->GetPawn();
 	if (!Pawn) return false;
 
-	// 1) Distance gate (use pawn location to target location)
-	const float Dist = FVector::Dist(Pawn->GetActorLocation(), Target->GetActorLocation());
-	if (Dist > (InteractRange + 30.f)) return false;
+	// Rebuild the same view trace on the server
+	FVector EyesLoc;
+	FRotator EyesRot;
+	Pawn->GetActorEyesViewPoint(EyesLoc, EyesRot);
 
-	// 2) Line-of-sight gate
-	if (!PC->LineOfSightTo(Target)) return false;
+	const FVector Start = EyesLoc;
+	const FVector End = Start + EyesRot.Vector() * InteractRange;
 
-	// 3) Interface check
-	if (!Target->GetClass()->ImplementsInterface(USFW_InteractableInterface::StaticClass())) return false;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(ServerInteractTrace), false, Pawn);
+	FHitResult Hit;
+
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+	{
+		return false; // nothing in front of the player on the server
+	}
+
+	AActor* HitActor = Hit.GetActor();
+	if (HitActor != Target)
+	{
+		// Client says “interact with X” but server trace sees something else.
+		return false;
+	}
+
+	const float Dist = FVector::Dist(EyesLoc, Hit.ImpactPoint);
+	if (Dist > InteractRange + 2.f)
+	{
+		return false;
+	}
+
+	if (!Target->GetClass()->ImplementsInterface(USFW_InteractableInterface::StaticClass()))
+	{
+		return false;
+	}
 
 	return true;
 }

@@ -37,17 +37,27 @@ ASFW_GameState::ASFW_GameState()
 	RadioIntegrity = 1.0f;
 }
 
-void ASFW_GameState::BeginRound(float Now, int32 Seed) {
+void ASFW_GameState::BeginRound(float Now, int32 Seed)
+{
 	RoundStartTime = Now;
 	RoundSeed = Seed;
 	RoundEndTime = -1.f;
+	RoundDuration = 0.f;
+	RoundResult = ESFWRoundResult::None;
+
 	bRoundInProgress = true;
+	bRoundActive = true;
 }
 
-void ASFW_GameState::EndRound(float Now) {
+void ASFW_GameState::EndRound(float Now)
+{
 	RoundEndTime = Now;
+	RoundDuration = FMath::Max(0.f, RoundEndTime - RoundStartTime);
+
 	bRoundInProgress = false;
+	bRoundActive = false;
 }
+
 
 void ASFW_GameState::OnRep_EvidenceWindow()
 {
@@ -180,20 +190,36 @@ void ASFW_GameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
+	// Round
 	DOREPLIFETIME(ASFW_GameState, bRoundActive);
 	DOREPLIFETIME(ASFW_GameState, RoundSeed);
 	DOREPLIFETIME(ASFW_GameState, RoundStartTime);
-	DOREPLIFETIME(ASFW_GameState, RoundEndTime);   
+	DOREPLIFETIME(ASFW_GameState, bRoundInProgress);
+	DOREPLIFETIME(ASFW_GameState, RoundEndTime);
+	DOREPLIFETIME(ASFW_GameState, RoundResult);
+	DOREPLIFETIME(ASFW_GameState, RoundDuration);
 
+	// Extraction
+	DOREPLIFETIME(ASFW_GameState, bExtractionCountdownActive);
+	DOREPLIFETIME(ASFW_GameState, ExtractionEndTime);
+
+	// Anomaly / rooms
 	DOREPLIFETIME(ASFW_GameState, AnomalyAggression);
 	DOREPLIFETIME(ASFW_GameState, ActiveClass);
 	DOREPLIFETIME(ASFW_GameState, BaseRoom);
 	DOREPLIFETIME(ASFW_GameState, RiftRoom);
+
+	// Evidence
 	DOREPLIFETIME(ASFW_GameState, bEvidenceWindowActive);
 	DOREPLIFETIME(ASFW_GameState, EvidenceWindowStartTime);
 	DOREPLIFETIME(ASFW_GameState, EvidenceWindowDurationSec);
 	DOREPLIFETIME(ASFW_GameState, CurrentEvidenceType);
+
+	// Binder
 	DOREPLIFETIME(ASFW_GameState, BinderDoorScareBudget);
+
+	// Radio
 	DOREPLIFETIME(ASFW_GameState, bRadioJammed);
 	DOREPLIFETIME(ASFW_GameState, RadioIntegrity);
 }
+

@@ -1,4 +1,4 @@
-#pragma once
+// SFW_AnomalyDecisionSystem.h
 
 #pragma once
 
@@ -6,12 +6,11 @@
 #include "GameFramework/Actor.h"
 #include "Engine/DataTable.h"
 #include "Core/AnomalySystems/SFW_DecisionTypes.h"
-#include "Core/Lights/SFW_PowerLibrary.h"
-#include "SFW_AnomalyDecisionSystem.generated.h"   // <-- NOTE: no AnomalyProp include here
+#include "SFW_AnomalyDecisionSystem.generated.h"
 
 class ARoomVolume;
 class ASFW_PlayerState;
-
+class ASFW_AnomalyController;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FSFWOnDecision, const FSFWDecisionPayload&);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSFWOnDecisionBP, const FSFWDecisionPayload&, Payload);
@@ -65,6 +64,10 @@ protected:
 	// Cached behavior bias from the active profile
 	float CachedDoorBias = 1.f;
 	float CachedLightBias = 1.f;
+
+	// Link to the round controller (for Shade decisions, etc.)
+	UPROPERTY()
+	ASFW_AnomalyController* AnomalyController = nullptr;
 
 	// Core loop
 	UFUNCTION()

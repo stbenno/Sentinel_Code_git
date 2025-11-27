@@ -20,6 +20,15 @@ enum class EAnomalyClass : uint8
 	Splitter   UMETA(DisplayName = "Splitter")
 };
 
+/* Game state - To complete the match loop*/
+UENUM(BlueprintType)
+enum class ESFWRoundResult : uint8
+{
+	None    UMETA(DisplayName = "None"),
+	Success UMETA(DisplayName = "Success"),
+	Fail    UMETA(DisplayName = "Fail")
+};
+
 UCLASS()
 class PROJECTSENTINELLABS_API ASFW_GameState : public AGameState
 {
@@ -46,6 +55,15 @@ public:
 	UFUNCTION(BlueprintCallable) void BeginRound(float Now, int32 Seed);
 	UFUNCTION(BlueprintCallable) void EndRound(float Now);
 
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Round")
+	bool bExtractionCountdownActive = false;
+
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Round")
+	float ExtractionEndTime = 0.f;   // server WorldTimeSeconds when it will complete
+	
+
+
+
 	// ------------------------
 	// Global pacing / anomaly info
 	// ------------------------
@@ -54,6 +72,14 @@ public:
 
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Anomaly")
 	EAnomalyClass ActiveClass;
+
+	// NEW
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Round")
+	ESFWRoundResult RoundResult = ESFWRoundResult::None;
+
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Round")
+	float RoundDuration = 0.f;
+
 
 	// ------------------------
 	// Rooms

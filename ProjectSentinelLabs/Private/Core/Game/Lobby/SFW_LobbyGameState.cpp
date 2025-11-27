@@ -1,9 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "Core/Game/Lobby/SFW_LobbyGameState.h"
 #include "Core/Game/SFW_PlayerState.h"
 #include "Net/UnrealNetwork.h"
+#include "Engine/World.h"
 
 ASFW_LobbyGameState::ASFW_LobbyGameState()
 {
@@ -26,6 +26,12 @@ void ASFW_LobbyGameState::BeginPlay()
 	BroadcastRoster();
 }
 
+bool ASFW_LobbyGameState::CanBroadcastToUI() const
+{
+	const UWorld* World = GetWorld();
+	return (World != nullptr && !World->bIsTearingDown);
+}
+
 void ASFW_LobbyGameState::SetLobbyPhase(ESFWLobbyPhase NewPhase)
 {
 	check(HasAuthority());
@@ -39,11 +45,18 @@ void ASFW_LobbyGameState::SetLobbyPhase(ESFWLobbyPhase NewPhase)
 
 void ASFW_LobbyGameState::OnRep_LobbyPhase()
 {
+	if (!CanBroadcastToUI())
+	{
+		return;
+	}
+
 	OnLobbyPhaseChanged.Broadcast(LobbyPhase);
 }
 
 void ASFW_LobbyGameState::SetCurrentMap(FName NewMap)
 {
+	UE_LOG(LogTemp, Log, TEXT("LobbyGS::SetCurrentMap -> %s"), *NewMap.ToString());
+
 	check(HasAuthority());
 
 	if (CurrentMap != NewMap)
@@ -55,6 +68,11 @@ void ASFW_LobbyGameState::SetCurrentMap(FName NewMap)
 
 void ASFW_LobbyGameState::OnRep_CurrentMap()
 {
+	if (!CanBroadcastToUI())
+	{
+		return;
+	}
+
 	OnMapChanged.Broadcast(CurrentMap);
 }
 
@@ -76,6 +94,11 @@ void ASFW_LobbyGameState::UnregisterPlayerState(ASFW_PlayerState* PS)
 
 void ASFW_LobbyGameState::BroadcastRoster()
 {
+	if (!CanBroadcastToUI())
+	{
+		return;
+	}
+
 	OnRosterUpdated.Broadcast();
 }
 
@@ -149,15 +172,15 @@ void ASFW_LobbyGameState::RefreshLocalBindings()
 
 void ASFW_LobbyGameState::HandlePSCharacterIDChanged(FName /*NewCharacterID*/)
 {
-	OnRosterUpdated.Broadcast();
+	BroadcastRoster();
 }
 
 void ASFW_LobbyGameState::HandlePSVariantIDChanged(FName /*NewVariantID*/)
 {
-	OnRosterUpdated.Broadcast();
+	BroadcastRoster();
 }
 
 void ASFW_LobbyGameState::HandlePSReadyChanged(bool /*bNewIsReady*/)
 {
-	OnRosterUpdated.Broadcast();
+	BroadcastRoster();
 }

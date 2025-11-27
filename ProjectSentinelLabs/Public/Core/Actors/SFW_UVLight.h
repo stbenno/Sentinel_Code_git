@@ -41,9 +41,6 @@ public:
 	bool IsOn() const { return bIsOn; }
 
 protected:
-	// Components
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UVLight")
-	TObjectPtr<UStaticMeshComponent> UVMesh;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UVLight")
 	TObjectPtr<USpotLightComponent> Spot;

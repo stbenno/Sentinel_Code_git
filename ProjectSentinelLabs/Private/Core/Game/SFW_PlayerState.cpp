@@ -23,9 +23,9 @@ void ASFW_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME(ASFW_PlayerState, CharacterIndex);
 
 	// Loadout
-	DOREPLIFETIME(ASFW_PlayerState, OptionalSlotsLimit);
-	DOREPLIFETIME(ASFW_PlayerState, SelectedOptionalIDs);
+	DOREPLIFETIME(ASFW_PlayerState, SelectedEquipmentIDs);
 
+	// Sanity / anomaly
 	DOREPLIFETIME(ASFW_PlayerState, Sanity);
 	DOREPLIFETIME(ASFW_PlayerState, SanityTier);
 
@@ -43,7 +43,14 @@ void ASFW_PlayerState::BeginPlay()
 	if (HasAuthority())
 	{
 		// 1 Hz server-side drift
-		GetWorldTimerManager().SetTimer(SanityTickHandle, this, &ASFW_PlayerState::SanityTick, 1.0f, true, 1.0f);
+		GetWorldTimerManager().SetTimer(
+			SanityTickHandle,
+			this,
+			&ASFW_PlayerState::SanityTick,
+			1.0f,
+			true,
+			1.0f
+		);
 	}
 }
 
@@ -77,6 +84,7 @@ void ASFW_PlayerState::SetIsReady(bool bNewReady)
 {
 	if (!HasAuthority()) return;
 	if (bIsReady == bNewReady) return;
+
 	bIsReady = bNewReady;
 	OnRep_IsReady();
 }
@@ -84,10 +92,17 @@ void ASFW_PlayerState::SetIsReady(bool bNewReady)
 void ASFW_PlayerState::ResetForLobby()
 {
 	if (!HasAuthority()) return;
+
 	if (bIsReady)
 	{
 		bIsReady = false;
 		OnRep_IsReady();
+	}
+
+	if (SelectedEquipmentIDs.Num() > 0)
+	{
+		SelectedEquipmentIDs.Reset();
+		OnRep_SelectedEquipmentIDs();
 	}
 }
 
@@ -95,36 +110,47 @@ void ASFW_PlayerState::ServerSetIsHost(bool bNewIsHost)
 {
 	check(HasAuthority());
 	if (bIsHost == bNewIsHost) return;
+
 	bIsHost = bNewIsHost;
 	OnRep_IsHost();
 }
 
-void ASFW_PlayerState::OnRep_SelectedCharacterID() { OnSelectedCharacterIDChanged.Broadcast(SelectedCharacterID); }
-void ASFW_PlayerState::OnRep_SelectedVariantID() { OnSelectedVariantIDChanged.Broadcast(SelectedVariantID); }
-void ASFW_PlayerState::OnRep_IsReady() { OnReadyChanged.Broadcast(bIsReady); }
-void ASFW_PlayerState::OnRep_IsHost() { OnHostFlagChanged.Broadcast(bIsHost); }
-void ASFW_PlayerState::OnRep_CharacterIndex() { ApplyIndexToSelectedID(); }
+void ASFW_PlayerState::OnRep_SelectedCharacterID()
+{
+	OnSelectedCharacterIDChanged.Broadcast(SelectedCharacterID);
+}
+
+void ASFW_PlayerState::OnRep_SelectedVariantID()
+{
+	OnSelectedVariantIDChanged.Broadcast(SelectedVariantID);
+}
+
+void ASFW_PlayerState::OnRep_IsReady()
+{
+	OnReadyChanged.Broadcast(bIsReady);
+}
+
+void ASFW_PlayerState::OnRep_IsHost()
+{
+	OnHostFlagChanged.Broadcast(bIsHost);
+}
+
+void ASFW_PlayerState::OnRep_CharacterIndex()
+{
+	ApplyIndexToSelectedID();
+}
+
 void ASFW_PlayerState::OnRep_PlayerName()
 {
 	Super::OnRep_PlayerName();
 	OnPlayerNameChanged.Broadcast(GetPlayerName());
 }
 
-// ---------- Optional equipment (server) ----------
-void ASFW_PlayerState::SanitizeOptionals(const TArray<FName>& InIDs, TArray<FName>& OutIDs) const
+// ---------- Equipment selection (server) ----------
+void ASFW_PlayerState::SanitizeEquipmentArray(const TArray<FName>& InIDs, TArray<FName>& OutIDs) const
 {
 	OutIDs = InIDs;
 	DedupAndStripNones(OutIDs);
-	ClampToSlotLimit(OutIDs);
-}
-
-void ASFW_PlayerState::ClampToSlotLimit(TArray<FName>& InOutIDs) const
-{
-	const int32 Limit = FMath::Max(0, OptionalSlotsLimit);
-	if (InOutIDs.Num() > Limit)
-	{
-		InOutIDs.SetNum(Limit);
-	}
 }
 
 void ASFW_PlayerState::DedupAndStripNones(TArray<FName>& InOutIDs) const
@@ -140,79 +166,27 @@ void ASFW_PlayerState::DedupAndStripNones(TArray<FName>& InOutIDs) const
 		Seen.Add(ID);
 		Clean.Add(ID);
 	}
+
 	InOutIDs = MoveTemp(Clean);
 }
 
-void ASFW_PlayerState::ServerSetSelectedOptionals_Implementation(const TArray<FName>& NewIDs)
+void ASFW_PlayerState::ServerSetSelectedEquipment_Implementation(const TArray<FName>& NewEquipmentIDs)
 {
 	if (!HasAuthority()) return;
 
 	TArray<FName> Clean;
-	SanitizeOptionals(NewIDs, Clean);
+	SanitizeEquipmentArray(NewEquipmentIDs, Clean);
 
-	if (SelectedOptionalIDs != Clean)
+	if (SelectedEquipmentIDs != Clean)
 	{
-		SelectedOptionalIDs = MoveTemp(Clean);
-		OnRep_SelectedOptionals();
+		SelectedEquipmentIDs = MoveTemp(Clean);
+		OnRep_SelectedEquipmentIDs();
 	}
 }
 
-void ASFW_PlayerState::ServerAddOptional_Implementation(FName OptionalID)
+void ASFW_PlayerState::OnRep_SelectedEquipmentIDs()
 {
-	if (!HasAuthority()) return;
-	if (OptionalID.IsNone()) return;
-
-	TArray<FName> Next = SelectedOptionalIDs;
-	Next.Add(OptionalID);
-	SanitizeOptionals(Next, Next);
-
-	if (SelectedOptionalIDs != Next)
-	{
-		SelectedOptionalIDs = MoveTemp(Next);
-		OnRep_SelectedOptionals();
-	}
-}
-
-void ASFW_PlayerState::ServerRemoveOptional_Implementation(FName OptionalID)
-{
-	if (!HasAuthority()) return;
-	if (OptionalID.IsNone()) return;
-
-	TArray<FName> Next = SelectedOptionalIDs;
-	Next.Remove(OptionalID);
-	// No need to sanitize beyond dedup/limit (removal already safe)
-	DedupAndStripNones(Next);
-
-	if (SelectedOptionalIDs != Next)
-	{
-		SelectedOptionalIDs = MoveTemp(Next);
-		OnRep_SelectedOptionals();
-	}
-}
-
-void ASFW_PlayerState::ServerSetOptionalSlotsLimit_Implementation(int32 NewLimit)
-{
-	if (!HasAuthority()) return;
-
-	const int32 Clamped = FMath::Clamp(NewLimit, 0, 16); // sane upper bound
-	if (OptionalSlotsLimit != Clamped)
-	{
-		OptionalSlotsLimit = Clamped;
-
-		// Clamp any current selection to new limit
-		TArray<FName> Next = SelectedOptionalIDs;
-		ClampToSlotLimit(Next);
-		if (SelectedOptionalIDs != Next)
-		{
-			SelectedOptionalIDs = MoveTemp(Next);
-			OnRep_SelectedOptionals();
-		}
-	}
-}
-
-void ASFW_PlayerState::OnRep_SelectedOptionals()
-{
-	OnOptionalsChanged.Broadcast();
+	OnEquipmentSelectionChanged.Broadcast();
 }
 
 // ---------- Anomaly / Sanity ----------
@@ -246,6 +220,7 @@ void ASFW_PlayerState::SetInRiftRoom(bool bIn)
 {
 	if (!HasAuthority()) return;
 	if (bInRiftRoom == bIn) return;
+
 	bInRiftRoom = bIn;
 	OnRep_InRiftRoom();
 }
@@ -253,8 +228,11 @@ void ASFW_PlayerState::SetInRiftRoom(bool bIn)
 void ASFW_PlayerState::StartBlackout(float DurationSeconds)
 {
 	if (!HasAuthority()) return;
+
 	bIsBlackedOut = true;
-	BlackoutEndTime = GetWorld() ? GetWorld()->GetTimeSeconds() + FMath::Max(0.f, DurationSeconds) : 0.f;
+	BlackoutEndTime = GetWorld()
+		? GetWorld()->GetTimeSeconds() + FMath::Max(0.f, DurationSeconds)
+		: 0.f;
 	OnRep_Blackout();
 }
 
@@ -262,6 +240,7 @@ void ASFW_PlayerState::ClearBlackout()
 {
 	if (!HasAuthority()) return;
 	if (!bIsBlackedOut) return;
+
 	bIsBlackedOut = false;
 	BlackoutEndTime = 0.f;
 	OnRep_Blackout();
@@ -271,15 +250,35 @@ void ASFW_PlayerState::SetInSafeRoom(bool bIn)
 {
 	if (!HasAuthority()) return;
 	if (bInSafeRoom == bIn) return;
+
 	bInSafeRoom = bIn;
 	OnRep_SafeRoom();
 }
 
-void ASFW_PlayerState::OnRep_Sanity() { OnSanityChanged.Broadcast(Sanity); }
-void ASFW_PlayerState::OnRep_SanityTier() { OnSanityTierChanged.Broadcast(SanityTier); }
-void ASFW_PlayerState::OnRep_InRiftRoom() { OnInRiftChanged.Broadcast(bInRiftRoom); }
-void ASFW_PlayerState::OnRep_Blackout() { OnBlackoutChanged.Broadcast(bIsBlackedOut); }
-void ASFW_PlayerState::OnRep_SafeRoom() { OnSafeRoomChanged.Broadcast(); }
+void ASFW_PlayerState::OnRep_Sanity()
+{
+	OnSanityChanged.Broadcast(Sanity);
+}
+
+void ASFW_PlayerState::OnRep_SanityTier()
+{
+	OnSanityTierChanged.Broadcast(SanityTier);
+}
+
+void ASFW_PlayerState::OnRep_InRiftRoom()
+{
+	OnInRiftChanged.Broadcast(bInRiftRoom);
+}
+
+void ASFW_PlayerState::OnRep_Blackout()
+{
+	OnBlackoutChanged.Broadcast(bIsBlackedOut);
+}
+
+void ASFW_PlayerState::OnRep_SafeRoom()
+{
+	OnSafeRoomChanged.Broadcast();
+}
 
 // ---------- Agent helpers & RPCs ----------
 int32 ASFW_PlayerState::GetAgentCount() const
@@ -290,13 +289,19 @@ int32 ASFW_PlayerState::GetAgentCount() const
 void ASFW_PlayerState::NormalizeIndex()
 {
 	const int32 Count = GetAgentCount();
-	if (Count <= 0) { CharacterIndex = 0; return; }
+	if (Count <= 0)
+	{
+		CharacterIndex = 0;
+		return;
+	}
+
 	CharacterIndex = (CharacterIndex % Count + Count) % Count;
 }
 
 void ASFW_PlayerState::ApplyIndexToSelectedID()
 {
 	if (!AgentCatalog) return;
+
 	const int32 Count = GetAgentCount();
 	if (Count <= 0) return;
 	if (!AgentCatalog->Agents.IsValidIndex(CharacterIndex)) return;
@@ -312,16 +317,22 @@ void ASFW_PlayerState::ApplyIndexToSelectedID()
 int32 ASFW_PlayerState::FindIndexByAgentID(FName InCharacterID) const
 {
 	if (!AgentCatalog) return INDEX_NONE;
+
 	for (int32 i = 0; i < AgentCatalog->Agents.Num(); ++i)
 	{
-		if (AgentCatalog->Agents[i].AgentID == InCharacterID) return i;
+		if (AgentCatalog->Agents[i].AgentID == InCharacterID)
+		{
+			return i;
+		}
 	}
+
 	return INDEX_NONE;
 }
 
 void ASFW_PlayerState::ServerSetCharacterIndex_Implementation(int32 NewIndex)
 {
 	if (!HasAuthority()) return;
+
 	CharacterIndex = NewIndex;
 	NormalizeIndex();
 	ApplyIndexToSelectedID();
@@ -356,6 +367,71 @@ void ASFW_PlayerState::ServerSetCharacterByID_Implementation(FName InCharacterID
 	}
 }
 
+void ASFW_PlayerState::ServerSetItemChecked_Implementation(FName ItemId, bool bIsChecked)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (ItemId.IsNone())
+	{
+		return;
+	}
+
+	// Work on a copy first
+	TArray<FName> Next = SelectedEquipmentIDs;
+
+	if (bIsChecked)
+	{
+		// Add if not present
+		if (!Next.Contains(ItemId))
+		{
+			Next.Add(ItemId);
+		}
+	}
+	else
+	{
+		// Remove if present
+		Next.Remove(ItemId);
+	}
+
+	// Clean up
+	DedupAndStripNones(Next);
+
+	// Only update + notify if something actually changed
+	if (SelectedEquipmentIDs != Next)
+	{
+		SelectedEquipmentIDs = MoveTemp(Next);
+		OnRep_SelectedEquipmentIDs();   // fire delegate locally on server
+	}
+}
+
+
+FText ASFW_PlayerState::GetSelectedEquipmentSummary() const
+{
+	if (SelectedEquipmentIDs.Num() == 0)
+	{
+		return FText::FromString(TEXT("None"));
+	}
+
+	FString Summary;
+
+	for (int32 i = 0; i < SelectedEquipmentIDs.Num(); ++i)
+	{
+		if (i > 0)
+		{
+			Summary += TEXT(", ");
+		}
+
+		Summary += SelectedEquipmentIDs[i].ToString();
+	}
+
+	return FText::FromString(Summary);
+}
+
+
+
 // ---------- Sanity tier compute (server) ----------
 void ASFW_PlayerState::RecomputeAndApplySanityTier()
 {
@@ -370,16 +446,28 @@ void ASFW_PlayerState::RecomputeAndApplySanityTier()
 	switch (SanityTier)
 	{
 	case ESanityTier::T1:
-		if (Sanity < (T1Min - Hyst)) NewTier = ESanityTier::T2;
+		if (Sanity < (T1Min - Hyst))
+		{
+			NewTier = ESanityTier::T2;
+		}
 		break;
 
 	case ESanityTier::T2:
-		if (Sanity >= T1Min)               NewTier = ESanityTier::T1;
-		else if (Sanity < (T2Min - Hyst))  NewTier = ESanityTier::T3;
+		if (Sanity >= T1Min)
+		{
+			NewTier = ESanityTier::T1;
+		}
+		else if (Sanity < (T2Min - Hyst))
+		{
+			NewTier = ESanityTier::T3;
+		}
 		break;
 
 	case ESanityTier::T3:
-		if (Sanity >= T2Min) NewTier = ESanityTier::T2;
+		if (Sanity >= T2Min)
+		{
+			NewTier = ESanityTier::T2;
+		}
 		break;
 	}
 
@@ -403,7 +491,10 @@ void ASFW_PlayerState::SanityTick()
 		if (Sanity < CeilValue)
 		{
 			Delta = SafeRoomRecoveryPerSec;
-			if (Sanity + Delta > CeilValue) Delta = CeilValue - Sanity;
+			if (Sanity + Delta > CeilValue)
+			{
+				Delta = CeilValue - Sanity;
+			}
 		}
 	}
 	else
@@ -418,7 +509,11 @@ void ASFW_PlayerState::SanityTick()
 
 			for (TActorIterator<APawn> ItPawn(W); ItPawn; ++ItPawn)
 			{
-				if (ItPawn->GetPlayerState() == this) { MyPawn = *ItPawn; break; }
+				if (ItPawn->GetPlayerState() == this)
+				{
+					MyPawn = *ItPawn;
+					break;
+				}
 			}
 
 			if (MyPawn)

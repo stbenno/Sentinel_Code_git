@@ -37,8 +37,13 @@ public:
 	virtual void BeginPlay() override;
 
 protected:
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equippable")
-	TObjectPtr<USkeletalMeshComponent> Mesh;
+
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Equippable")
+	TObjectPtr<UStaticMeshComponent> Mesh;
+
+	//UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equippable")
+	//TObjectPtr<USceneComponent> Root;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equippable")
 	TObjectPtr<UBoxComponent> InteractionCollision;
@@ -83,7 +88,7 @@ public:
 	virtual void PrimaryUse() {}
 	virtual void SecondaryUse() {}
 
-	USkeletalMeshComponent* GetMesh() const { return Mesh; }
+	UStaticMeshComponent* GetMesh() const { return Mesh; }
 
 	// Interactable interface
 	virtual FText GetPromptText_Implementation() const override;
@@ -102,6 +107,14 @@ protected:
 
 	virtual UPrimitiveComponent* GetPhysicsComponent() const;
 	virtual FName GetAttachSocketName() const;
+
+	// Per-item offset relative to the hand socket
+	UPROPERTY(EditDefaultsOnly, Category = "Equip")
+	FTransform HandOffset = FTransform::Identity;
+	
+private: 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equippable", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UPrimitiveComponent> PhysicsComponent = nullptr;
 
 public:
 	// Voice comms flag

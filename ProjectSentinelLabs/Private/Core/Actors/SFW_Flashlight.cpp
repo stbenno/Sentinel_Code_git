@@ -17,14 +17,6 @@ ASFW_Flashlight::ASFW_Flashlight()
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 
-	// Visible mesh (physics body for drop)
-	FlashlightMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FlashlightMesh"));
-	FlashlightMesh->SetupAttachment(GetMesh());                 // GetMesh() is the root SkeletalMesh from EquippableBase
-	FlashlightMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	FlashlightMesh->SetCastShadow(true);
-	FlashlightMesh->SetIsReplicated(true);
-	FlashlightMesh->SetVisibility(true, true);
-
 	EquipSlot = ESFWEquipSlot::Hand_Light;
 
 	// Light

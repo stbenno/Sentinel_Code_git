@@ -5,10 +5,18 @@
 
 FString USFW_GameInstance::MakePlayerKey(const APlayerState* PS)
 {
-	if (!PS) return FString();
-	if (PS->GetUniqueId().IsValid())
-	{
-		return PS->GetUniqueId()->ToString();
-	}
-	return PS->GetPlayerName();
+    if (!PS)
+    {
+        return FString();
+    }
+
+    // Prefer network ID when available
+    const FUniqueNetIdRepl& NetIdRepl = PS->GetUniqueId();
+    if (NetIdRepl.IsValid())
+    {
+        return NetIdRepl->ToString();
+    }
+
+    // Fallback for PIE / offline
+    return PS->GetPlayerName();
 }

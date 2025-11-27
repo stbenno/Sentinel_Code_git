@@ -22,15 +22,6 @@ ASFW_SoundSensor::ASFW_SoundSensor()
 	// Generic tool slot for now
 	EquipSlot = ESFWEquipSlot::Hand_Tool;
 
-	// Root skeletal mesh is EquippableBase::Mesh
-
-	SensorMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SensorMesh"));
-	SensorMesh->SetupAttachment(GetMesh());
-	SensorMesh->SetIsReplicated(true);
-	SensorMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	SensorMesh->SetCastShadow(true);
-	SensorMesh->SetVisibility(true, true);
-
 	LoopAudioComp = CreateDefaultSubobject<UAudioComponent>(TEXT("LoopAudioComp"));
 	LoopAudioComp->SetupAttachment(SensorMesh);
 	LoopAudioComp->bAutoActivate = false;

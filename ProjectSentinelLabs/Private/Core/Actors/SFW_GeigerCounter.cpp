@@ -22,15 +22,6 @@ ASFW_GeigerCounter::ASFW_GeigerCounter()
 	// Use EMF-style hand slot for now
 	EquipSlot = ESFWEquipSlot::Hand_EMF;
 
-	// Root skeletal mesh is EquippableBase::Mesh
-
-	GeigerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GeigerMesh"));
-	GeigerMesh->SetupAttachment(GetMesh());
-	GeigerMesh->SetIsReplicated(true);
-	GeigerMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	GeigerMesh->SetCastShadow(true);
-	GeigerMesh->SetVisibility(true, true);
-
 	LoopAudioComp = CreateDefaultSubobject<UAudioComponent>(TEXT("LoopAudioComp"));
 	LoopAudioComp->SetupAttachment(GeigerMesh);
 	LoopAudioComp->bAutoActivate = false;

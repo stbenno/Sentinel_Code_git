@@ -2,10 +2,10 @@
 
 #include "Core/Actors/SFW_UVLight.h"
 
-#include "Components/StaticMeshComponent.h"
+
 #include "Components/SpotLightComponent.h"
 #include "Components/PrimitiveComponent.h"
-#include "Components/SkeletalMeshComponent.h"
+
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Net/UnrealNetwork.h"
@@ -21,19 +21,11 @@ ASFW_UVLight::ASFW_UVLight()
 	bReplicates = true;
 	bNetUseOwnerRelevancy = true;
 
-	// Visible mesh body
-	UVMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("UVMesh"));
-	UVMesh->SetupAttachment(GetMesh());
-	UVMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	UVMesh->SetCastShadow(true);
-	UVMesh->SetIsReplicated(true);
-	UVMesh->SetVisibility(true, true);
-
 	EquipSlot = ESFWEquipSlot::Hand_Light;
 
 	// UV spot
 	Spot = CreateDefaultSubobject<USpotLightComponent>(TEXT("UVSpot"));
-	Spot->SetupAttachment(UVMesh);
+	Spot->SetupAttachment(Mesh);
 	Spot->Mobility = EComponentMobility::Movable;
 	Spot->IntensityUnits = IntensityUnits;
 	Spot->bUseInverseSquaredFalloff = false;
@@ -58,21 +50,18 @@ void ASFW_UVLight::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(ASFW_UVLight, bIsOn);
 }
 
-UPrimitiveComponent* ASFW_UVLight::GetPhysicsComponent() const
-{
-	return UVMesh ? UVMesh : Super::GetPhysicsComponent();
-}
+
 
 void ASFW_UVLight::OnEquipped(ACharacter* NewOwnerChar)
 {
 	Super::OnEquipped(NewOwnerChar);
 
-	if (UVMesh)
+	if (Mesh)
 	{
-		UVMesh->SetSimulatePhysics(false);
-		UVMesh->SetEnableGravity(false);
-		UVMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		UVMesh->SetVisibility(true, true);
+		Mesh->SetSimulatePhysics(false);
+		Mesh->SetEnableGravity(false);
+		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh->SetVisibility(true, true);
 	}
 
 	ApplyLightState();
@@ -86,11 +75,11 @@ void ASFW_UVLight::OnUnequipped()
 		Spot->SetIntensity(0.f);
 	}
 
-	if (UVMesh)
+	if (Mesh)
 	{
-		UVMesh->SetSimulatePhysics(false);
-		UVMesh->SetEnableGravity(false);
-		UVMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh->SetSimulatePhysics(false);
+		Mesh->SetEnableGravity(false);
+		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
 	if (HasAuthority())
@@ -139,6 +128,11 @@ void ASFW_UVLight::Server_SetLightEnabled_Implementation(bool bEnable)
 void ASFW_UVLight::OnRep_IsOn()
 {
 	ApplyLightState();
+}
+
+UPrimitiveComponent* ASFW_UVLight::GetPhysicsComponent() const
+{
+	return Mesh;
 }
 
 void ASFW_UVLight::ApplyLightState()
